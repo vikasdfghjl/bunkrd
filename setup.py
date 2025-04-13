@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="bunkrdownloader",
+    name="bunkrd",
     version="1.0.0",
     description="A tool to download files from Bunkr and Cyberdrop",
     author="BunkrDownloader Contributors",
@@ -16,8 +16,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "bunkrdownloader=bunkrdownloader.cli:main",
-            "bunkrd=bunkrdownloader.cli:main",  # Shorter alias
+            "bunkrd=bunkrd.cli:main",
+            "bunkrdownloader=bunkrd.cli:main",  # Keep old name as alias for backward compatibility
         ],
     },
     classifiers=[

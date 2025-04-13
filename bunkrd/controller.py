@@ -262,84 +262,89 @@ class DownloadController:
         error_count = 0
         
         # Create a progress bar for overall download progress
-        with tqdm(total=len(file_urls), desc="Overall Download Progress", unit="files") as pbar:
-            # Use a slightly lower number of workers if there are many files
-            # This helps prevent overwhelming the server
-            if len(file_urls) > 10:
-                actual_workers = min(self.max_concurrent_downloads, max(2, self.max_concurrent_downloads - 1))
-            else:
-                actual_workers = self.max_concurrent_downloads
-                
-            logger.info(f"Using {actual_workers} concurrent download threads")
+        print(f"\nTotal files to download: {len(file_urls)}")
+        print(f"Download destination: {os.path.abspath(download_dir)}")
+        print("Starting downloads...\n")
+
+        # Use a slightly lower number of workers if there are many files
+        # This helps prevent overwhelming the server
+        if len(file_urls) > 10:
+            actual_workers = min(self.max_concurrent_downloads, max(2, self.max_concurrent_downloads - 1))
+        else:
+            actual_workers = self.max_concurrent_downloads
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
-                # Submit initial batch of downloads
-                futures_to_url = {}
-                for i, url in enumerate(file_urls[:actual_workers]):
-                    # Add a small delay between submitting each download task
-                    if i > 0:
-                        time.sleep(CONCURRENT_DELAY)
-                    futures_to_url[executor.submit(self._download_file, url, download_dir)] = url
-                    active_downloads += 1
+        logger.info(f"Using {actual_workers} concurrent download threads")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers) as executor:
+            # Submit initial batch of downloads
+            futures_to_url = {}
+            for i, url in enumerate(file_urls[:actual_workers]):
+                # Add a small delay between submitting each download task
+                if i > 0:
+                    time.sleep(CONCURRENT_DELAY)
+                futures_to_url[executor.submit(self._download_file, url, download_dir)] = url
+                active_downloads += 1
+            
+            # Process results and add new downloads as others complete
+            remaining_urls = file_urls[actual_workers:]
+            completed_count = 0
+            
+            # If we encounter too many consecutive errors, reduce concurrency
+            consecutive_errors = 0
+            reduced_concurrency = False
+            
+            while futures_to_url:
+                # Wait for the next future to complete
+                done, _ = concurrent.futures.wait(
+                    futures_to_url.keys(),
+                    return_when=concurrent.futures.FIRST_COMPLETED
+                )
                 
-                # Process results and add new downloads as others complete
-                remaining_urls = file_urls[actual_workers:]
-                
-                # If we encounter too many consecutive errors, reduce concurrency
-                consecutive_errors = 0
-                reduced_concurrency = False
-                
-                while futures_to_url:
-                    # Wait for the next future to complete
-                    done, _ = concurrent.futures.wait(
-                        futures_to_url.keys(),
-                        return_when=concurrent.futures.FIRST_COMPLETED
-                    )
+                for future in done:
+                    url = futures_to_url.pop(future)
+                    active_downloads -= 1
+                    completed_count += 1
                     
-                    for future in done:
-                        url = futures_to_url.pop(future)
-                        active_downloads -= 1
-                        
-                        try:
-                            success = future.result()
-                            if success:
-                                consecutive_errors = 0
-                                pbar.set_postfix_str(f"Last: Success")
-                            else:
-                                error_count += 1
-                                consecutive_errors += 1
-                                pbar.set_postfix_str(f"Last: Failed, Errors: {error_count}")
-                            
-                            results.append(success)
-                            pbar.update(1)
-                            
-                            # If we encounter too many consecutive errors, reduce concurrency
-                            if consecutive_errors >= 3 and not reduced_concurrency:
-                                reduced_workers = max(1, actual_workers // 2)
-                                logger.warning(f"Too many consecutive errors, reducing concurrency to {reduced_workers} workers")
-                                actual_workers = reduced_workers
-                                reduced_concurrency = True
-                                # Allow some time for the system to recover
-                                time.sleep(3.0)
-                            
-                        except Exception as e:
-                            logger.error(f"Error processing {url}: {str(e)}")
-                            results.append(False)
+                    try:
+                        success = future.result()
+                        if success:
+                            consecutive_errors = 0
+                        else:
                             error_count += 1
                             consecutive_errors += 1
-                            pbar.set_postfix_str(f"Failed with error, Errors: {error_count}")
-                            pbar.update(1)
                         
-                        # Submit a new download task if there are URLs remaining and we haven't hit our concurrency limit
-                        if remaining_urls and active_downloads < actual_workers:
-                            next_url = remaining_urls.pop(0)
-                            # Add a small delay between submitting new download tasks
-                            time.sleep(CONCURRENT_DELAY)
-                            futures_to_url[executor.submit(self._download_file, next_url, download_dir)] = next_url
-                            active_downloads += 1
+                        results.append(success)
+                        
+                        # Print a simple status update after each file
+                        print(f"Progress: {completed_count}/{len(file_urls)} files completed")
+                        
+                        # If we encounter too many consecutive errors, reduce concurrency
+                        if consecutive_errors >= 3 and not reduced_concurrency:
+                            reduced_workers = max(1, actual_workers // 2)
+                            logger.warning(f"Too many consecutive errors, reducing concurrency to {reduced_workers} workers")
+                            actual_workers = reduced_workers
+                            reduced_concurrency = True
+                            # Allow some time for the system to recover
+                            time.sleep(3.0)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {url}: {str(e)}")
+                        results.append(False)
+                        error_count += 1
+                        consecutive_errors += 1
+                        print(f"Error downloading: {url}")
+                    
+                    # Submit a new download task if there are URLs remaining and we haven't hit our concurrency limit
+                    if remaining_urls and active_downloads < actual_workers:
+                        next_url = remaining_urls.pop(0)
+                        # Add a small delay between submitting new download tasks
+                        time.sleep(CONCURRENT_DELAY)
+                        futures_to_url[executor.submit(self._download_file, next_url, download_dir)] = next_url
+                        active_downloads += 1
         
         # Check if all downloads were successful
         success_count = sum(1 for r in results if r)
+        print(f"\nDownload complete: {success_count}/{len(file_urls)} files downloaded successfully")
         logger.info(f"Download complete: {success_count}/{len(file_urls)} files downloaded successfully")
         return all(results)
             

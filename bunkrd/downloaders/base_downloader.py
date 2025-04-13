@@ -165,7 +165,8 @@ class BaseDownloader:
                     mode = 'ab' if start_byte > 0 else 'wb'
                     
                     with open(temp_path, mode) as f:
-                        with tqdm(total=file_size, initial=start_byte, unit='B', unit_scale=True, desc=file_name, leave=False) as pbar:
+                        # Changed leave=False to leave=True to keep the progress bar visible
+                        with tqdm(total=file_size, initial=start_byte, unit='B', unit_scale=True, desc=file_name, leave=True) as pbar:
                             # Use optimized chunk size
                             for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                                 if chunk:  # Filter out keep-alive new chunks
