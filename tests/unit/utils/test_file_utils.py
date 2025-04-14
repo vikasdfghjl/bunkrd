@@ -6,10 +6,14 @@ import unittest
 from unittest import mock
 import tempfile
 import shutil
-from bunkrdownloader.utils.file_utils import (
-    get_url_data, get_and_prepare_download_path, 
-    write_url_to_list, get_already_downloaded_url,
-    mark_as_downloaded, remove_illegal_chars
+from bunkrd.utils.file_utils import (
+    get_url_data,
+    get_and_prepare_download_path,
+    write_url_to_list,
+    get_already_downloaded_url,
+    mark_as_downloaded,
+    mark_as_failed,
+    remove_illegal_chars
 )
 
 
@@ -39,9 +43,9 @@ class TestFileUtils(unittest.TestCase):
         self.assertEqual(data["file_name"], "file")
         self.assertEqual(data["extension"], "")
         
-        # Test with malformed URL - no need to check for print calls
-        # since the implementation handles errors without printing
+        # Test with malformed URL
         data = get_url_data("not a url")
+        # Updated to match the actual behavior of the function
         self.assertEqual(data["file_name"], "not a url")
     
     def test_get_and_prepare_download_path(self):

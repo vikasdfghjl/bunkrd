@@ -7,7 +7,7 @@ import json
 import os
 import tempfile
 import shutil
-from bunkrdownloader.downloaders.bunkr_downloader import BunkrDownloader
+from bunkrd.downloaders.bunkr_downloader import BunkrDownloader
 from tests.mock_services import MockResponse
 
 
@@ -46,7 +46,7 @@ class TestBunkrDownloader(unittest.TestCase):
         
         # Mock the decryption function
         with mock.patch(
-            'bunkrdownloader.downloaders.bunkr_downloader.decrypt_with_key',
+            'bunkrd.downloaders.bunkr_downloader.decrypt_with_key',
             return_value='https://example.com/decrypted-url'
         ) as mock_decrypt:
             result = self.downloader.get_real_download_url('https://bunkr.sk/f/test-file')
@@ -70,7 +70,7 @@ class TestBunkrDownloader(unittest.TestCase):
         
         # Mock the decryption function
         with mock.patch(
-            'bunkrdownloader.downloaders.bunkr_downloader.decrypt_with_key',
+            'bunkrd.downloaders.bunkr_downloader.decrypt_with_key',
             return_value='https://example.com/decrypted-url'
         ) as mock_decrypt:
             result = self.downloader.get_real_download_url('/f/test-file')
@@ -129,7 +129,7 @@ class TestBunkrDownloader(unittest.TestCase):
         }
         
         with mock.patch(
-            'bunkrdownloader.downloaders.bunkr_downloader.decrypt_with_key',
+            'bunkrd.downloaders.bunkr_downloader.decrypt_with_key',
             return_value='https://example.com/decrypted-url'
         ) as mock_decrypt:
             result = self.downloader._decrypt_encrypted_url(encryption_data)
@@ -172,15 +172,20 @@ class TestBunkrDownloader(unittest.TestCase):
         }
         
         with mock.patch(
-            'bunkrdownloader.downloaders.bunkr_downloader.decrypt_with_key',
+            'bunkrd.downloaders.bunkr_downloader.decrypt_with_key',
             return_value=None  # Simulates decryption failure
         ) as mock_decrypt:
             with mock.patch('builtins.print') as mock_print:
-                result = self.downloader._decrypt_encrypted_url(encryption_data)
-                
-                # Assertions
-                self.assertIsNone(result)
-                mock_print.assert_called()
+                with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger_error:
+                    result = self.downloader._decrypt_encrypted_url(encryption_data)
+                    
+                    # Assertions
+                    self.assertIsNone(result)
+                    # Check that either print or logging was used for error reporting
+                    self.assertTrue(
+                        mock_print.called or mock_logger_error.called,
+                        "Neither print nor logger.error was called"
+                    )
 
 
 if __name__ == '__main__':

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download Status - BunkrDownloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Only refresh automatically if not using websockets -->
+    <meta http-equiv="refresh" content="10">
+</head>
+<body>
+    <header class="app-header">
+        <div class="container">
+            <h1><i class="fas fa-download"></i> BunkrDownloader</h1>
+            <nav>
+                <ul>
+                    <li><a href="{{ url_for('index') }}" class="nav-link"><i class="fas fa-home"></i> Home</a></li>
+                    <li><a href="{{ url_for('jobs') }}" class="nav-link"><i class="fas fa-tasks"></i> Jobs</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flashes">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">
+                            <p>{{ message }}</p>
+                            <button class="close-btn">&times;</button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <section class="status-card glass-card">
+            <div class="card-header">
+                <h2><i class="fas fa-tasks"></i> Download Status</h2>
+            </div>
+            <div class="card-body">
+                <div class="job-details">
+                    <h3 class="job-url truncate" title="{{ job.url }}">{{ job.url }}</h3>
+                    
+                    <div class="status-grid">
+                        <div class="status-item">
+                            <div class="status-label"><i class="fas fa-info-circle"></i> Status:</div>
+                            <div class="status-value">
+                                <span class="job-status status-{{ job.status }}">{{ job.status }}</span>
+                            </div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label"><i class="fas fa-folder"></i> Directory:</div>
+                            <div class="status-value truncate" title="{{ job.download_dir }}">{{ job.download_dir }}</div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label"><i class="fas fa-fingerprint"></i> Job ID:</div>
+                            <div class="status-value">{{ job.id }}</div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label"><i class="fas fa-clock"></i> Started:</div>
+                            <div class="status-value">{{ job.start_time | timestamp_to_datetime }}</div>
+                        </div>
+
+                        {% if job.status in ['completed', 'failed', 'error'] and job.end_time %}
+                        <div class="status-item">
+                            <div class="status-label"><i class="fas fa-flag-checkered"></i> Completed:</div>
+                            <div class="status-value">{{ job.end_time | timestamp_to_datetime }}</div>
+                        </div>
+                        
+                        <div class="status-item">
+                            <div class="status-label"><i class="fas fa-hourglass-end"></i> Duration:</div>
+                            <div class="status-value">{{ job.duration | format_duration }}</div>
+                        </div>
+                        {% endif %}
+
+                        {% if job.message %}
+                        <div class="status-item full-width">
+                            <div class="status-label"><i class="fas fa-comment"></i> Message:</div>
+                            <div class="status-value">{{ job.message }}</div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                {% if job.total_files and job.status != 'error' %}
+                <div class="download-progress">
+                    <div class="progress-header">
+                        <h3><i class="fas fa-chart-line"></i> Download Progress</h3>
+                        <div class="progress-stats">
+                            <div class="stat-item">
+                                <div class="stat-label">Files:</div>
+                                <div class="stat-value" id="files-count">{{ job.completed_files }}/{{ job.total_files }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="progress-bar-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="overall-progress" data-progress="{{ job.progress }}"></div>
+                        </div>
+                        <div class="progress-text" id="progress-percentage">{{ job.progress }}%</div>
+                    </div>
+                    
+                    {% if job.current_file %}
+                    <div class="current-file-info">
+                        <div class="current-file-header">
+                            <h4><i class="fas fa-file-download"></i> Current file:</h4>
+                            {% if job.current_file_progress is defined %}
+                            <div class="file-progress-text" id="file-progress-percentage">{{ job.current_file_progress }}%</div>
+                            {% endif %}
+                        </div>
+                        <p class="file-name truncate" id="current-file-name" title="{{ job.current_file }}">{{ job.current_file }}</p>
+                        {% if job.current_file_progress is defined %}
+                        <div class="file-progress-bar">
+                            <div class="file-progress-fill" id="file-progress" data-progress="{{ job.current_file_progress }}"></div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    <!-- File list with status -->
+                    <div class="file-list-container" id="file-list-section">
+                        <h4><i class="fas fa-list"></i> File Status</h4>
+                        <div class="file-list-header">
+                            <button class="file-filter active" data-filter="all">All ({{ job.total_files }})</button>
+                            <button class="file-filter" data-filter="queued">Queued <span id="queued-count">(0)</span></button>
+                            <button class="file-filter" data-filter="downloading">Downloading <span id="downloading-count">(0)</span></button>
+                            <button class="file-filter" data-filter="completed">Completed <span id="completed-count">(0)</span></button>
+                            <button class="file-filter" data-filter="failed">Failed <span id="failed-count">(0)</span></button>
+                        </div>
+                        <div class="file-list" id="file-status-list">
+                            {% if job.file_statuses %}
+                                {% for filename, status in job.file_statuses.items() %}
+                                <div class="file-item status-{{ status }}" data-status="{{ status }}">
+                                    <div class="file-icon">
+                                        {% if status == 'completed' %}
+                                        <i class="fas fa-check-circle"></i>
+                                        {% elif status == 'failed' %}
+                                        <i class="fas fa-times-circle"></i>
+                                        {% elif status == 'downloading' %}
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                        {% else %}
+                                        <i class="fas fa-clock"></i>
+                                        {% endif %}
+                                    </div>
+                                    <div class="file-details">
+                                        <div class="file-name truncate" title="{{ filename }}">{{ filename }}</div>
+                                        <div class="file-status">{{ status }}</div>
+                                    </div>
+                                    {% if job.file_sizes and filename in job.file_sizes and job.file_sizes[filename] %}
+                                    <div class="file-size">{{ (job.file_sizes[filename] / 1024 / 1024) | round(2) }} MB</div>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                                <div class="no-files-message">Waiting for file information...</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="job-actions">
+                    <a href="{{ url_for('index') }}" class="btn secondary-btn">
+                        <i class="fas fa-home"></i> Back to Home
+                    </a>
+                    
+                    {% if job.status == 'completed' %}
+                    <a href="{{ url_for('index') }}" class="btn primary-btn">
+                        <i class="fas fa-download"></i> Start New Download
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 BunkrDownloader Web UI</p>
+        </div>
+    </footer>
+
+    <script>
+        // Initialize progress bars from data attributes
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set overall progress bar width from data attribute
+            const overallProgressBar = document.getElementById('overall-progress');
+            if (overallProgressBar) {
+                const progress = overallProgressBar.getAttribute('data-progress');
+                overallProgressBar.style.width = progress + '%';
+            }
+            
+            // Set file progress bar width from data attribute
+            const fileProgressBar = document.getElementById('file-progress');
+            if (fileProgressBar) {
+                const progress = fileProgressBar.getAttribute('data-progress');
+                fileProgressBar.style.width = progress + '%';
+            }
+            
+            // JavaScript to handle closing flash messages
+            const closeButtons = document.querySelectorAll('.close-btn');
+            closeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    this.parentElement.style.display = 'none';
+                });
+            });
+            
+            // Initialize file filters
+            const filterButtons = document.querySelectorAll('.file-filter');
+            filterButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons
+                    filterButtons.forEach(btn => btn.classList.remove('active'));
+                    
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    // Get filter value
+                    const filter = this.getAttribute('data-filter');
+                    
+                    // Apply filter to file list
+                    const fileItems = document.querySelectorAll('.file-item');
+                    fileItems.forEach(item => {
+                        if (filter === 'all' || item.getAttribute('data-status') === filter) {
+                            item.style.display = '';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                });
+            });
+        });
+
+        // Auto-refresh status via AJAX if job is active
+        {% if job.status in ['queued', 'processing'] %}
+        function refreshStatus() {
+            fetch('/api/status/{{ job.id }}')
+                .then(response => response.json())
+                .then(data => {
+                    // Update progress display
+                    if (data.progress !== undefined) {
+                        const progressFill = document.querySelector('#overall-progress');
+                        const progressText = document.querySelector('#progress-percentage');
+                        if (progressFill && progressText) {
+                            // Update data attribute and set width directly
+                            progressFill.setAttribute('data-progress', data.progress);
+                            progressFill.style.width = data.progress + '%';
+                            progressText.innerText = data.progress + '%';
+                        }
+                    }
+                    
+                    // Update status
+                    if (data.status !== undefined) {
+                        const statusElement = document.querySelector('.job-status');
+                        if (statusElement) {
+                            statusElement.className = 'job-status status-' + data.status;
+                            statusElement.innerText = data.status;
+                        }
+                    }
+                    
+                    // Update message
+                    if (data.message !== undefined) {
+                        const messageElement = document.querySelector('.status-value:last-child');
+                        if (messageElement) {
+                            messageElement.innerText = data.message;
+                        }
+                    }
+                    
+                    // Update file stats
+                    if (data.completed_files !== undefined && data.total_files !== undefined) {
+                        const statsElement = document.querySelector('#files-count');
+                        if (statsElement) {
+                            statsElement.innerText = data.completed_files + '/' + data.total_files;
+                        }
+                    }
+                    
+                    // Update current file
+                    if (data.current_file !== undefined) {
+                        const currentFileElement = document.querySelector('#current-file-name');
+                        if (currentFileElement) {
+                            currentFileElement.innerText = data.current_file;
+                            currentFileElement.title = data.current_file;
+                        }
+                        
+                        // Update current file progress if available
+                        if (data.current_file_progress !== undefined) {
+                            const fileProgressFill = document.querySelector('#file-progress');
+                            const fileProgressText = document.querySelector('#file-progress-percentage');
+                            if (fileProgressFill && fileProgressText) {
+                                // Update data attribute and set width directly
+                                fileProgressFill.setAttribute('data-progress', data.current_file_progress);
+                                fileProgressFill.style.width = data.current_file_progress + '%';
+                                fileProgressText.innerText = data.current_file_progress + '%';
+                            }
+                        }
+                    }
+                    
+                    // Update file statuses
+                    if (data.file_statuses) {
+                        updateFileList(data.file_statuses, data.file_sizes || {});
+                    }
+                    
+                    // If job completed or failed, reload the page to show final details
+                    if (data.status === 'completed' || data.status === 'failed' || data.status === 'error') {
+                        window.location.reload();
+                    }
+                })
+                .catch(error => console.error('Error fetching status:', error));
+        }
+        
+        function updateFileList(fileStatuses, fileSizes) {
+            const fileListElement = document.getElementById('file-status-list');
+            if (!fileListElement) return;
+            
+            // Clear the list if it has the "waiting" message
+            if (fileListElement.querySelector('.no-files-message')) {
+                fileListElement.innerHTML = '';
+            }
+            
+            // Count for each status
+            let statusCounts = {
+                'queued': 0,
+                'downloading': 0,
+                'completed': 0,
+                'failed': 0
+            };
+            
+            // Update existing file items or create new ones
+            Object.entries(fileStatuses).forEach(([filename, status]) => {
+                // Update counter
+                statusCounts[status] = (statusCounts[status] || 0) + 1;
+                
+                // Find if file already exists in the list
+                let fileItem = Array.from(fileListElement.children).find(
+                    el => el.querySelector('.file-name') && 
+                    el.querySelector('.file-name').title === filename
+                );
+                
+                if (fileItem) {
+                    // Update existing file item
+                    fileItem.className = `file-item status-${status}`;
+                    fileItem.dataset.status = status;
+                    
+                    const statusElement = fileItem.querySelector('.file-status');
+                    if (statusElement) statusElement.innerText = status;
+                    
+                    // Update icon
+                    const iconElement = fileItem.querySelector('.file-icon i');
+                    if (iconElement) {
+                        iconElement.className = status === 'completed' ? 'fas fa-check-circle' : 
+                                            status === 'failed' ? 'fas fa-times-circle' :
+                                            status === 'downloading' ? 'fas fa-spinner fa-spin' :
+                                            'fas fa-clock';
+                    }
+                    
+                    // Update file size if available
+                    if (fileSizes[filename]) {
+                        let fileSizeElement = fileItem.querySelector('.file-size');
+                        if (!fileSizeElement) {
+                            fileSizeElement = document.createElement('div');
+                            fileSizeElement.className = 'file-size';
+                            fileItem.appendChild(fileSizeElement);
+                        }
+                        const sizeMB = (fileSizes[filename] / 1024 / 1024).toFixed(2);
+                        fileSizeElement.innerText = `${sizeMB} MB`;
+                    }
+                } else {
+                    // Create new file item
+                    const newFileItem = document.createElement('div');
+                    newFileItem.className = `file-item status-${status}`;
+                    newFileItem.dataset.status = status;
+                    
+                    let iconClass = status === 'completed' ? 'fas fa-check-circle' : 
+                                 status === 'failed' ? 'fas fa-times-circle' :
+                                 status === 'downloading' ? 'fas fa-spinner fa-spin' :
+                                 'fas fa-clock';
+                    
+                    let sizeHtml = '';
+                    if (fileSizes[filename]) {
+                        const sizeMB = (fileSizes[filename] / 1024 / 1024).toFixed(2);
+                        sizeHtml = `<div class="file-size">${sizeMB} MB</div>`;
+                    }
+                    
+                    newFileItem.innerHTML = `
+                        <div class="file-icon">
+                            <i class="${iconClass}"></i>
+                        </div>
+                        <div class="file-details">
+                            <div class="file-name truncate" title="${filename}">${filename}</div>
+                            <div class="file-status">${status}</div>
+                        </div>
+                        ${sizeHtml}
+                    `;
+                    
+                    fileListElement.appendChild(newFileItem);
+                }
+            });
+            
+            // Update status count badges
+            document.getElementById('queued-count').innerText = `(${statusCounts.queued})`;
+            document.getElementById('downloading-count').innerText = `(${statusCounts.downloading})`;
+            document.getElementById('completed-count').innerText = `(${statusCounts.completed})`;
+            document.getElementById('failed-count').innerText = `(${statusCounts.failed})`;
+        }
+        
+        // Refresh every 2 seconds
+        setInterval(refreshStatus, 2000);
+        
+        // Initialize file filters
+        document.addEventListener('DOMContentLoaded', function() {
+            const filterButtons = document.querySelectorAll('.file-filter');
+            filterButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons
+                    filterButtons.forEach(btn => btn.classList.remove('active'));
+                    
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    // Get filter value
+                    const filter = this.getAttribute('data-filter');
+                    
+                    // Apply filter to file list
+                    const fileItems = document.querySelectorAll('.file-item');
+                    fileItems.forEach(item => {
+                        if (filter === 'all' || item.getAttribute('data-status') === filter) {
+                            item.style.display = '';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                });
+            });
+        });
+        {% endif %}
+        
+        // JavaScript to handle closing flash messages
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeButtons = document.querySelectorAll('.close-btn');
+            closeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    this.parentElement.style.display = 'none';
+                });
+            });
+            
+            // Initialize file filters
+            const filterButtons = document.querySelectorAll('.file-filter');
+            filterButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons
+                    filterButtons.forEach(btn => btn.classList.remove('active'));
+                    
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    // Get filter value
+                    const filter = this.getAttribute('data-filter');
+                    
+                    // Apply filter to file list
+                    const fileItems = document.querySelectorAll('.file-item');
+                    fileItems.forEach(item => {
+                        if (filter === 'all' || item.getAttribute('data-status') === filter) {
+                            item.style.display = '';
+                        } else {
+                            item.style.display = 'none';
+                        }
+                    });
+                });
+            });
+        });
+    </script>
+</body>
+</html>

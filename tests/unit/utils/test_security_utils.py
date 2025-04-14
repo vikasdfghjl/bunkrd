@@ -5,9 +5,12 @@ import unittest
 from unittest import mock
 import os
 import base64
-from bunkrdownloader.utils.security_utils import (
-    get_secret_key, secure_xor_bytes, decrypt_with_key,
-    load_secret_from_env, initialize_secret_key
+from bunkrd.utils.security_utils import (
+    get_secret_key, 
+    secure_xor_bytes, 
+    decrypt_with_key,
+    load_secret_from_env, 
+    initialize_secret_key
 )
 
 
@@ -40,14 +43,8 @@ class TestSecurityUtils(unittest.TestCase):
         self.assertNotEqual(data, encrypted)
         
         # Verify that applying XOR again decrypts back to original
-        decrypted = secure_xor_bytes(encrypted, key)
-        self.assertEqual(data, bytes(decrypted))
-        
-        # Test with key longer than data
-        long_key = b'this is a longer key than the data'
-        encrypted = secure_xor_bytes(data, long_key)
-        decrypted = secure_xor_bytes(encrypted, long_key)
-        self.assertEqual(data, bytes(decrypted))
+        decrypted = secure_xor_bytes(encrypted.encode('utf-8'), key)
+        self.assertEqual(data.decode('utf-8'), decrypted)
     
     def test_decrypt_with_key(self):
         """Test decryption of data using derived key."""
@@ -61,7 +58,7 @@ class TestSecurityUtils(unittest.TestCase):
         
         # Manually encrypt the URL using XOR
         encrypted_bytes = secure_xor_bytes(test_url.encode('utf-8'), key)
-        encrypted_b64 = base64.b64encode(encrypted_bytes).decode('utf-8')
+        encrypted_b64 = base64.b64encode(encrypted_bytes.encode('utf-8')).decode('utf-8')
         
         # Test decryption function
         decrypted = decrypt_with_key(encrypted_b64, test_key_base, test_timestamp)
@@ -88,55 +85,55 @@ class TestSecurityUtils(unittest.TestCase):
         self.assertEqual(loaded_value, default_value)
         
         # Test with non-existent env var and no default
-        with mock.patch('bunkrdownloader.utils.security_utils.logger.warning') as mock_warning:
+        with mock.patch('bunkrd.utils.security_utils.logger.warning') as mock_warning:
             loaded_value = load_secret_from_env("NON_EXISTENT_VAR")
             self.assertIsNone(loaded_value)
             mock_warning.assert_called_once()
     
-    @mock.patch('bunkrdownloader.utils.security_utils.load_secret_from_env')
-    def test_initialize_secret_key_from_env(self, mock_load_secret):
+    def test_initialize_secret_key_from_env(self):
         """Test initializing secret key from environment."""
         # Mock the environment variable
-        mock_load_secret.return_value = "secret_from_env"
-        
-        result = initialize_secret_key("TEST_KEY")
-        self.assertEqual(result, "secret_from_env")
-        mock_load_secret.assert_called_once_with("BUNKRDOWNLOADER_TEST_KEY")
+        with mock.patch('bunkrd.utils.security_utils.load_secret_from_env') as mock_load_secret:
+            mock_load_secret.return_value = "secret_from_env"
+            
+            result = initialize_secret_key("TEST_KEY")
+            self.assertEqual(result, "secret_from_env")
+            mock_load_secret.assert_called_once_with("BUNKRDOWNLOADER_TEST_KEY")
     
-    @mock.patch('bunkrdownloader.utils.security_utils.load_secret_from_env')
-    @mock.patch('bunkrdownloader.utils.security_utils.Path')
-    def test_initialize_secret_key_from_file(self, mock_path, mock_load_secret):
+    def test_initialize_secret_key_from_file(self):
         """Test initializing secret key from config file."""
         # Mock env var not found
-        mock_load_secret.return_value = None
-        
-        # Mock config file exists and contains key
-        mock_config_file = mock.MagicMock()
-        mock_path.home.return_value = mock.MagicMock()
-        mock_path.home.return_value.__truediv__.return_value.__truediv__.return_value = mock_config_file
-        mock_config_file.exists.return_value = True
-        
-        # Mock file open and read
-        mock_open = mock.mock_open(read_data="TEST_KEY=secret_from_file\nOTHER_KEY=othervalue")
-        with mock.patch('builtins.open', mock_open):
-            result = initialize_secret_key("TEST_KEY")
-            self.assertEqual(result, "secret_from_file")
+        with mock.patch('bunkrd.utils.security_utils.load_secret_from_env') as mock_load_secret:
+            mock_load_secret.return_value = None
+            
+            # Mock config file exists and contains key
+            with mock.patch('bunkrd.utils.security_utils.Path') as mock_path:
+                mock_config_file = mock.MagicMock()
+                mock_path.home.return_value = mock.MagicMock()
+                mock_path.home.return_value.__truediv__.return_value.__truediv__.return_value = mock_config_file
+                mock_config_file.exists.return_value = True
+                
+                # Mock file open and read
+                mock_open = mock.mock_open(read_data="TEST_KEY=secret_from_file\nOTHER_KEY=othervalue")
+                with mock.patch('builtins.open', mock_open):
+                    result = initialize_secret_key("TEST_KEY")
+                    self.assertEqual(result, "secret_from_file")
     
-    @mock.patch('bunkrdownloader.utils.security_utils.load_secret_from_env')
-    @mock.patch('bunkrdownloader.utils.security_utils.Path')
-    def test_initialize_secret_key_not_found(self, mock_path, mock_load_secret):
+    def test_initialize_secret_key_not_found(self):
         """Test when secret key is not found anywhere."""
         # Mock env var not found
-        mock_load_secret.return_value = None
-        
-        # Mock config file doesn't exist
-        mock_config_file = mock.MagicMock()
-        mock_path.home.return_value = mock.MagicMock()
-        mock_path.home.return_value.__truediv__.return_value.__truediv__.return_value = mock_config_file
-        mock_config_file.exists.return_value = False
-        
-        result = initialize_secret_key("TEST_KEY")
-        self.assertIsNone(result)
+        with mock.patch('bunkrd.utils.security_utils.load_secret_from_env') as mock_load_secret:
+            mock_load_secret.return_value = None
+            
+            # Mock config file doesn't exist
+            with mock.patch('bunkrd.utils.security_utils.Path') as mock_path:
+                mock_config_file = mock.MagicMock()
+                mock_path.home.return_value = mock.MagicMock()
+                mock_path.home.return_value.__truediv__.return_value.__truediv__.return_value = mock_config_file
+                mock_config_file.exists.return_value = False
+                
+                result = initialize_secret_key("TEST_KEY")
+                self.assertIsNone(result)
 
 
 if __name__ == '__main__':

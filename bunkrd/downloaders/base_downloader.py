@@ -179,17 +179,25 @@ class BaseDownloader:
                     mode = 'ab' if start_byte > 0 else 'wb'
                     
                     with open(temp_path, mode) as f:
-                        # Configure tqdm to only show the progress bar
-                        # Set dynamic_ncols=True to adjust to terminal width
-                        with tqdm(
-                            total=file_size, 
-                            initial=start_byte, 
-                            unit='B', 
-                            unit_scale=True, 
-                            bar_format='{bar} {percentage:3.0f}% | {n_fmt}/{total_fmt} | {rate_fmt} | Elapsed: {elapsed}',
-                            dynamic_ncols=True,
-                            leave=True
-                        ) as pbar:
+                        # Define ANSI color codes
+                        blue = '\033[34m'
+                        green = '\033[32m'
+                        orange = '\033[33m'
+                        reset = '\033[0m'
+                        
+                        # Configure tqdm with proper color initialization
+                        tqdm_kwargs = {
+                            'total': file_size,
+                            'initial': start_byte,
+                            'unit': 'B',
+                            'unit_scale': True,
+                            'dynamic_ncols': True,
+                            'leave': True,
+                            'mininterval': 0.5,
+                            'bar_format': f'{{bar}} {blue}{{percentage:3.0f}}%{reset} of {{n_fmt}}/{{total_fmt}} at {green}{{rate_fmt}}{reset} ETA {orange}[{{remaining}}]{reset}'
+                        }
+                        
+                        with tqdm(**tqdm_kwargs) as pbar:
                             # Use optimized chunk size
                             for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                                 if chunk:  # Filter out keep-alive new chunks

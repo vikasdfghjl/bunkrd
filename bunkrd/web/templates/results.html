@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download Results - BunkrDownloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>BunkrDownloader</h1>
+            <nav>
+                <ul>
+                    <li><a href="{{ url_for('index') }}">Home</a></li>
+                    <li><a href="{{ url_for('jobs') }}">Jobs</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flashes">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">
+                            <p>{{ message }}</p>
+                            <button class="close-btn">&times;</button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <section class="card">
+            <div class="card-header">
+                <h2>
+                    {% if job.status == 'completed' %}
+                    <i class="fas fa-check-circle text-success"></i> Download Complete
+                    {% elif job.status == 'failed' %}
+                    <i class="fas fa-times-circle text-danger"></i> Download Failed
+                    {% elif job.status == 'error' %}
+                    <i class="fas fa-exclamation-triangle text-warning"></i> Download Error
+                    {% else %}
+                    <i class="fas fa-info-circle"></i> Download Results
+                    {% endif %}
+                </h2>
+            </div>
+            <div class="card-body">
+                <div class="job-details">
+                    <h3 class="job-url">{{ job.url }}</h3>
+                    
+                    <div class="status-banner status-{{ job.status }}">
+                        {% if job.status == 'completed' %}
+                            <i class="fas fa-check-circle"></i> Download completed successfully
+                        {% elif job.status == 'failed' %}
+                            <i class="fas fa-times-circle"></i> Download failed
+                        {% elif job.status == 'error' %}
+                            <i class="fas fa-exclamation-triangle"></i> Error occurred during download
+                        {% endif %}
+                    </div>
+
+                    <div class="detail-row">
+                        <div class="detail-label">Download directory:</div>
+                        <div class="detail-value">{{ job.download_dir }}</div>
+                    </div>
+
+                    <div class="detail-row">
+                        <div class="detail-label">Job ID:</div>
+                        <div class="detail-value">{{ job.id }}</div>
+                    </div>
+
+                    <div class="detail-row">
+                        <div class="detail-label">Started:</div>
+                        <div class="detail-value">{{ job.start_time | timestamp_to_datetime }}</div>
+                    </div>
+
+                    {% if job.end_time %}
+                    <div class="detail-row">
+                        <div class="detail-label">Completed:</div>
+                        <div class="detail-value">{{ job.end_time | timestamp_to_datetime }}</div>
+                    </div>
+                    
+                    <div class="detail-row">
+                        <div class="detail-label">Duration:</div>
+                        <div class="detail-value">{{ job.duration | format_duration }}</div>
+                    </div>
+                    {% endif %}
+
+                    {% if job.message %}
+                    <div class="detail-row">
+                        <div class="detail-label">Message:</div>
+                        <div class="detail-value">{{ job.message }}</div>
+                    </div>
+                    {% endif %}
+                    
+                    {% if job.total_files %}
+                    <div class="detail-row">
+                        <div class="detail-label">Files:</div>
+                        <div class="detail-value">{{ job.completed_files }}/{{ job.total_files }} files downloaded</div>
+                    </div>
+                    {% endif %}
+                </div>
+
+                {% if job.status == 'completed' %}
+                <div class="download-success">
+                    <p>Your files have been downloaded successfully to:</p>
+                    <div class="directory-path">
+                        <i class="fas fa-folder-open"></i> {{ job.download_dir }}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if job.status in ['failed', 'error'] and job.message %}
+                <div class="download-error">
+                    <p>Error details:</p>
+                    <div class="error-message">
+                        {{ job.message }}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="job-actions">
+                    <a href="{{ url_for('index') }}" class="btn secondary-btn">
+                        <i class="fas fa-home"></i> Back to Home
+                    </a>
+                    
+                    <a href="{{ url_for('index') }}" class="btn primary-btn">
+                        <i class="fas fa-download"></i> Start New Download
+                    </a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 BunkrDownloader Web UI</p>
+        </div>
+    </footer>
+
+    <script>
+        // JavaScript to handle closing flash messages
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeButtons = document.querySelectorAll('.close-btn');
+            closeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    this.parentElement.style.display = 'none';
+                });
+            });
+        });
+    </script>
+</body>
+</html>

@@ -9,7 +9,7 @@ import os
 import tempfile
 import shutil
 from unittest import mock
-from bunkrdownloader.controller import DownloadController
+from bunkrd.controller import DownloadController
 from tests.mock_services import MockRequestsSession
 
 
@@ -29,17 +29,17 @@ class TestDownloadWorkflow(unittest.TestCase):
         self.session_patcher.start()
         
         # Mock the decrypt_with_key function to always return a valid URL
-        self.decrypt_patcher = mock.patch('bunkrdownloader.utils.security_utils.decrypt_with_key', 
+        self.decrypt_patcher = mock.patch('bunkrd.utils.security_utils.decrypt_with_key', 
                                          return_value='https://example.com/decrypted-test-url')
         self.decrypt_patcher.start()
         
         # Mock the BaseDownloader.download method to always return True
-        self.download_patcher = mock.patch('bunkrdownloader.downloaders.base_downloader.BaseDownloader.download',
+        self.download_patcher = mock.patch('bunkrd.downloaders.base_downloader.BaseDownloader.download',
                                           return_value=True)
         self.download_patcher.start()
         
         # Mock the BunkrDownloader.get_real_download_url method to return a valid URL
-        self.get_url_patcher = mock.patch('bunkrdownloader.downloaders.bunkr_downloader.BunkrDownloader.get_real_download_url',
+        self.get_url_patcher = mock.patch('bunkrd.downloaders.bunkr_downloader.BunkrDownloader.get_real_download_url',
                                          return_value={'url': 'https://example.com/decrypted-test-url', 'size': 1024})
         self.get_url_patcher.start()
         
@@ -83,7 +83,7 @@ class TestDownloadWorkflow(unittest.TestCase):
         url = "https://bunkr.sk/a/test-album"
         
         # Mock the parse_album method to return test data
-        with mock.patch('bunkrdownloader.parsers.bunkr_parser.BunkrParser.parse_album') as mock_parse:
+        with mock.patch('bunkrd.parsers.bunkr_parser.BunkrParser.parse_album') as mock_parse:
             mock_parse.return_value = {
                 "album_name": "Test Album", 
                 "files": ["https://bunkr.sk/f/test-file1", "https://bunkr.sk/f/test-file2"]

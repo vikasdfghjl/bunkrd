@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BunkrDownloader Web UI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>BunkrDownloader</h1>
+            <nav>
+                <ul>
+                    <li><a href="{{ url_for('index') }}" class="active">Home</a></li>
+                    <li><a href="{{ url_for('jobs') }}">Jobs</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flashes">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">
+                            <p>{{ message }}</p>
+                            <button class="close-btn">&times;</button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <section class="card">
+            <div class="card-header">
+                <h2><i class="fas fa-cloud-download-alt"></i> Start New Download</h2>
+            </div>
+            <div class="card-body">
+                <form action="{{ url_for('submit') }}" method="post">
+                    <div class="form-group">
+                        <label for="url">URL to download (album or file):</label>
+                        <input type="text" id="url" name="url" placeholder="https://bunkr.sk/a/example-album" required class="form-control">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="download-dir">Download directory:</label>
+                        <input type="text" id="download-dir" name="download_dir" value="{{ download_dir }}" class="form-control">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group checkbox">
+                            <input type="checkbox" id="use-proxy" name="use_proxy">
+                            <label for="use-proxy">Use proxy</label>
+                        </div>
+                        
+                        <div class="form-group checkbox">
+                            <input type="checkbox" id="concurrent" name="concurrent" checked>
+                            <label for="concurrent">Use concurrent downloads</label>
+                        </div>
+                    </div>
+                    
+                    <!-- Advanced Options -->
+                    <div class="form-group">
+                        <details>
+                            <summary>Advanced Options</summary>
+                            <div class="advanced-options-container">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="concurrent-count">Concurrent downloads:</label>
+                                        <input type="number" id="concurrent-count" name="concurrent_count" value="3" min="1" max="10" class="form-control-sm">
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="min-delay">Min delay (sec):</label>
+                                        <input type="number" id="min-delay" name="min_delay" value="1.0" min="0.1" step="0.1" class="form-control-sm">
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="max-delay">Max delay (sec):</label>
+                                        <input type="number" id="max-delay" name="max_delay" value="3.0" min="0.1" step="0.1" class="form-control-sm">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group checkbox">
+                                        <input type="checkbox" id="no-robots" name="no_robots_check">
+                                        <label for="no-robots">Disable robots.txt compliance</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn primary-btn">
+                            <i class="fas fa-download"></i> Start Download
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2><i class="fas fa-tasks"></i> Active Downloads</h2>
+            </div>
+            <div class="card-body">
+                {% if active_jobs %}
+                    <div class="job-list">
+                        {% for job_id, job in active_jobs.items() %}
+                            <div class="job-item">
+                                <div class="job-header">
+                                    <h3 class="job-title truncate">{{ job.url }}</h3>
+                                    <span class="job-status status-{{ job.status }}">{{ job.status }}</span>
+                                </div>
+                                <div class="job-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: '{{ job.progress }}%'"></div>
+                                    </div>
+                                    <span class="progress-text">{{ job.progress }}%</span>
+                                </div>
+                                <div class="job-actions">
+                                    <a href="{{ url_for('status', job_id=job.id) }}" class="btn small-btn">View Details</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-state">No active downloads</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2><i class="fas fa-history"></i> Recent Jobs</h2>
+            </div>
+            <div class="card-body">
+                {% if recent_jobs %}
+                    <div class="job-list">
+                        {% for job in recent_jobs %}
+                            <div class="job-item">
+                                <div class="job-header">
+                                    <h3 class="job-title truncate">{{ job.url }}</h3>
+                                    <span class="job-status status-{{ job.status }}">{{ job.status }}</span>
+                                </div>
+                                <div class="job-info">
+                                    <span>Download folder: <span class="job-path truncate">{{ job.download_dir }}</span></span>
+                                </div>
+                                <div class="job-actions">
+                                    <a href="{{ url_for('status', job_id=job.id) }}" class="btn small-btn">View Details</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-state">No recent jobs</p>
+                {% endif %}
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 BunkrDownloader Web UI</p>
+        </div>
+    </footer>
+
+    <script>
+        // JavaScript to handle closing flash messages
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeButtons = document.querySelectorAll('.close-btn');
+            closeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    this.parentElement.style.display = 'none';
+                });
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Jobs - BunkrDownloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <meta http-equiv="refresh" content="30">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>BunkrDownloader</h1>
+            <nav>
+                <ul>
+                    <li><a href="{{ url_for('index') }}">Home</a></li>
+                    <li><a href="{{ url_for('jobs') }}" class="active">Jobs</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flashes">
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">
+                            <p>{{ message }}</p>
+                            <button class="close-btn">&times;</button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <section class="card">
+            <div class="card-header">
+                <h2><i class="fas fa-tasks"></i> Active Downloads</h2>
+            </div>
+            <div class="card-body">
+                {% if active_jobs %}
+                    <div class="job-list">
+                        {% for job_id, job in active_jobs.items() %}
+                            <div class="job-item">
+                                <div class="job-header">
+                                    <h3 class="job-title truncate">{{ job.url }}</h3>
+                                    <span class="job-status status-{{ job.status }}">{{ job.status }}</span>
+                                </div>
+                                <div class="job-progress">
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: {{ job.progress }}%"></div>
+                                    </div>
+                                    <span class="progress-text">{{ job.progress }}%</span>
+                                </div>
+                                {% if job.message %}
+                                <div class="job-message">{{ job.message }}</div>
+                                {% endif %}
+                                <div class="job-meta">
+                                    <div class="meta-item"><i class="fas fa-clock"></i> Started: {{ job.start_time | timestamp_to_datetime }}</div>
+                                    <div class="meta-item"><i class="fas fa-folder"></i> {{ job.download_dir }}</div>
+                                </div>
+                                <div class="job-actions">
+                                    <a href="{{ url_for('status', job_id=job.id) }}" class="btn small-btn">View Details</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-state">No active downloads</p>
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="card-header">
+                <h2><i class="fas fa-history"></i> Completed Downloads</h2>
+            </div>
+            <div class="card-body">
+                {% if completed_jobs %}
+                    <div class="job-list">
+                        {% for job_id, job in completed_jobs.items() %}
+                            <div class="job-item">
+                                <div class="job-header">
+                                    <h3 class="job-title truncate">{{ job.url }}</h3>
+                                    <span class="job-status status-{{ job.status }}">{{ job.status }}</span>
+                                </div>
+                                <div class="job-meta">
+                                    <div class="meta-item"><i class="fas fa-clock"></i> Completed: {{ job.end_time | timestamp_to_datetime }}</div>
+                                    <div class="meta-item"><i class="fas fa-stopwatch"></i> Duration: {{ job.duration | format_duration }}</div>
+                                    <div class="meta-item"><i class="fas fa-folder"></i> {{ job.download_dir }}</div>
+                                </div>
+                                {% if job.message %}
+                                <div class="job-message">{{ job.message }}</div>
+                                {% endif %}
+                                <div class="job-actions">
+                                    <a href="{{ url_for('status', job_id=job.id) }}" class="btn small-btn">View Details</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-state">No completed downloads yet</p>
+                {% endif %}
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 BunkrDownloader Web UI</p>
+        </div>
+    </footer>
+
+    <script>
+        // JavaScript to handle closing flash messages
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeButtons = document.querySelectorAll('.close-btn');
+            closeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    this.parentElement.style.display = 'none';
+                });
+            });
+        });
+    </script>
+</body>
+</html>
