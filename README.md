@@ -6,6 +6,8 @@ A command-line tool to download files from Bunkr and Cyberdrop.
 
 - Download individual files or entire albums from Bunkr and Cyberdrop
 - Track already downloaded files to avoid re-downloading
+- Track failed downloads to prevent repeated attempts on problematic files
+- Display download speed metrics in real-time and summary statistics
 - Automatically create directories based on album names
 - Support for both direct file URLs and album URLs
 - Error handling and retry mechanism
@@ -102,6 +104,26 @@ bunkrd -u https://bunkr.sk/a/example-album --proxy socks5://127.0.0.1:9050 --con
 ```bash
 python dump.py -u https://bunkr.sk/a/example-album -o ./downloads
 ```
+
+## Smart Download Handling
+
+### Download Speed Display
+
+The tool shows real-time download speed information:
+
+- Individual file progress bars display current speed in MB/s
+- After completing all downloads, summary information shows:
+  - Total downloaded data size
+  - Average download speed across all files
+  - Number of files skipped (already downloaded)
+
+### Failed Download Tracking
+
+To prevent the tool from repeatedly attempting to download problematic files:
+
+- Failed downloads are marked with a `[FAILED]` tag in the `already_downloaded.txt` file
+- When running the tool again, these files will be skipped with a "Skipped (Failed Previously)" message
+- To retry downloading a failed file, simply remove its entry from the `already_downloaded.txt` file
 
 ## Testing
 

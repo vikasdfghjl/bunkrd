@@ -134,6 +134,31 @@ def mark_as_downloaded(item_url, download_path):
         print(f"[-] Unexpected error marking URL as downloaded: {str(e)}")
         return False
 
+def mark_as_failed(item_url, download_path):
+    """
+    Mark a URL as failed by writing it to already_downloaded.txt with a [FAILED] tag.
+    This prevents repeated attempts to download files that consistently fail.
+    
+    Args:
+        item_url (str): The URL that failed to download
+        download_path (str): Path to the download directory
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        file_path = os.path.join(download_path, ALREADY_DOWNLOADED_FILE)
+        try:
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(f"{item_url} [FAILED]\n")
+            return True
+        except IOError as e:
+            print(f"[-] Error updating already_downloaded.txt: {str(e)}")
+            return False
+    except Exception as e:
+        print(f"[-] Unexpected error marking URL as failed: {str(e)}")
+        return False
+
 def remove_illegal_chars(string):
     """
     Remove illegal characters from a string for use as a filename.

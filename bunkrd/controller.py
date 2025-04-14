@@ -649,10 +649,17 @@ class DownloadController:
             
             # Check if already downloaded
             already_downloaded = get_already_downloaded_url(download_path)
-            if file_url in already_downloaded:
-                msg = f"Skipping already downloaded: {file_url}"
-                logger.info(msg)
-                print(f"\n{draw_box(msg, title='Skipped', color='blue')}\n")
+            # Check for either exact URL or URL with [FAILED] tag
+            if file_url in already_downloaded or any(line.startswith(file_url + " [FAILED]") for line in already_downloaded):
+                # If it's a failed download, show a different message
+                if any(line.startswith(file_url + " [FAILED]") for line in already_downloaded):
+                    msg = f"Skipping previously failed download: {file_url}"
+                    logger.info(msg)
+                    print(f"\n{draw_box(msg, title='Skipped (Failed Previously)', color='yellow')}\n")
+                else:
+                    msg = f"Skipping already downloaded: {file_url}"
+                    logger.info(msg)
+                    print(f"\n{draw_box(msg, title='Skipped', color='blue')}\n")
                 # Return a minimal successful result without speed
                 return {'success': True, 'skipped': True} 
                 
@@ -669,6 +676,9 @@ class DownloadController:
                 error_msg = f"Failed to get download URL for: {file_url}"
                 logger.error(error_msg)
                 print(f"\n{draw_box(error_msg, title='Error', color='red')}\n")
+                # Mark this URL as failed so we don't try it again
+                from .utils.file_utils import mark_as_failed
+                mark_as_failed(file_url, download_path)
                 return False
                 
             # Download the file
@@ -687,16 +697,28 @@ class DownloadController:
                     print(f"{format_text('Download completed:', 'green')} {file_size_mb:.2f} MB at {speed_mbps:.2f} MB/s")
                     result['formatted_speed'] = f"{speed_mbps:.2f} MB/s"
                 
+                from .utils.file_utils import mark_as_downloaded
+                mark_as_downloaded(file_url, download_path)
                 return result
             elif result is True:  # Handle legacy boolean return
                 from .utils.file_utils import mark_as_downloaded
                 mark_as_downloaded(file_url, download_path)
                 return {'success': True}
             else:
+                # Mark this URL as failed so we don't try it again
+                from .utils.file_utils import mark_as_failed
+                mark_as_failed(file_url, download_path)
                 return False
                 
         except Exception as e:
             error_msg = f"Error downloading file {file_url}: {str(e)}"
             logger.error(error_msg)
             print(f"\n{draw_box(error_msg, title='Error', color='red')}\n")
+            # Mark as failed even if there's an exception
+            try:
+                download_path = get_and_prepare_download_path(download_dir, None)
+                from .utils.file_utils import mark_as_failed
+                mark_as_failed(file_url, download_path)
+            except:
+                pass  # Ensure we don't crash while trying to mark as failed
             return False
