@@ -54,29 +54,36 @@ class BunkrParser:
         """
         Parse a Bunkr album page and extract file information.
         
+        This method implements a robust web scraping approach with multiple extraction
+        strategies and fallback mechanisms to handle different site layouts and
+        potential page structure changes over time.
+        
         Args:
             url (str): The URL of the Bunkr album
             
         Returns:
-            dict: Dictionary containing album name and list of file URLs
+            dict: Dictionary containing:
+                - album_name (str): Name of the album extracted from the page
+                - files (list): List of file URLs found in the album
         """
         try:
-            # Add proper scheme if missing
+            # Add proper scheme if missing (normalize URL format)
             if not url.startswith('http'):
                 url = f'https://{url}'
                 
-            # Standardize Bunkr URLs
+            # Standardize Bunkr URLs - the site uses multiple domains that point to same content
+            # Converting all to bunkr.sk for consistency
             original_url = url
             url = url.replace('bunkr.la', 'bunkr.sk').replace('bunkr.is', 'bunkr.sk').replace('bunkr.cr', 'bunkr.sk')
             
             logger.info(f"Parsing album at URL: {url} (original: {original_url})")
             
-            # Check robots.txt if enabled
+            # Check robots.txt if enabled in config - respect site's crawling policies
             if RESPECT_ROBOTS_TXT and not can_fetch(url, self.session.headers.get('User-Agent')):
                 logger.warning(f"Access to {url} is denied by robots.txt")
                 return {"album_name": ERROR_MESSAGES["robots_txt_denied"], "files": []}
             
-            # Make request with rate limiting, UA rotation, etc.
+            # Make request with rate limiting, UA rotation, etc. to avoid detection and IP bans
             response = make_request_with_rate_limit(
                 self.session, 
                 'get', 
@@ -85,15 +92,18 @@ class BunkrParser:
                 check_robots=False  # Already checked above
             )
             
+            # Handle HTTP errors (404, 403, etc.)
             if response.status_code != 200:
                 logger.error(f"HTTP error: {response.status_code} for URL: {url}")
                 return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}
             
             logger.info(f"Successfully fetched URL: {url}")
             
+            # Parse HTML content with BeautifulSoup
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Extract album name
+            # PART 1: Extract album name from page heading
+            # First try to find h1 with specific class, then fallback to any h1
             h1_tag = soup.find('h1', class_='block truncate')
             if not h1_tag:
                 h1_tag = soup.find('h1')  # Try without class if not found
@@ -103,17 +113,19 @@ class BunkrParser:
                 album_name = remove_illegal_chars(h1_tag.text.strip())
                 logger.info(f"Found album name: {album_name}")
             
-            # Extract file links - try multiple approaches
+            # PART 2: Extract file links using multiple strategies
             file_links = []
             
-            # Method 1: Look for links with 'shadow-md' class (original approach)
+            # Strategy 1: Look for links with 'shadow-md' class (primary approach)
+            # This targets the standard thumbnail container links in most Bunkr layouts
             links = soup.find_all('a', class_=lambda c: c and 'shadow-md' in c)
             for link in links:
                 href = link.get('href')
                 if href and ('/f/' in href or '/a/' in href or '/d/' in href):
                     file_links.append(urljoin('https://bunkr.sk', href))
             
-            # Method 2: Look for links with image elements inside
+            # Strategy 2: Look for any links with paths matching file/album patterns
+            # Fallback if the page layout changed and class-based approach fails
             if not file_links:
                 logger.info("No links found with shadow-md class, trying alternative methods")
                 for link in soup.find_all('a'):
@@ -121,7 +133,8 @@ class BunkrParser:
                     if href and ('/f/' in href or '/a/' in href or '/d/' in href):
                         file_links.append(urljoin('https://bunkr.sk', href))
             
-            # Method 3: Try to find any links matching specific patterns
+            # Strategy 3: Use regex pattern matching as a last resort
+            # This is the most permissive approach but might catch false positives
             if not file_links:
                 logger.info("No links found with image elements, trying regex pattern matching")
                 all_links = soup.find_all('a', href=True)
@@ -130,18 +143,23 @@ class BunkrParser:
                     if href and re.search(r'/(f|a|d)/[a-zA-Z0-9]{8,}', href):
                         file_links.append(urljoin('https://bunkr.sk', href))
             
-            # Debug output for testing
+            # Log detailed debug info if no files were found despite all strategies
+            # This helps diagnose site changes that break the parser
             if not file_links:
                 logger.warning(f"No downloadable items found in album: {url}")
-                # Print some debug info about page structure
+                # Comment out debug info section - for debugging purposes only
+                '''
+                # Print some debug info about page structure to help diagnose issues
                 all_links = soup.find_all('a', href=True)
                 logger.debug(f"Found {len(all_links)} total links in the page")
                 for i, link in enumerate(all_links[:10]):  # First 10 links only
                     logger.debug(f"Link {i}: {link.get('href')} - Classes: {link.get('class')} - Text: {link.text.strip()[:30]}")
+                '''
             else:
                 logger.info(f"Found {len(file_links)} files in album")
                 
             return {"album_name": album_name, "files": file_links}
         except Exception as e:
+            # Catch and log any unexpected exceptions to prevent crash
             logger.exception(f"Error parsing Bunkr album {url}: {str(e)}")
             return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}

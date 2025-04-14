@@ -62,7 +62,8 @@ class CyberdropParser:
             
             # Check robots.txt if enabled
             if RESPECT_ROBOTS_TXT and not can_fetch(url, self.session.headers.get('User-Agent')):
-                print(f"[-] Access to {url} is denied by robots.txt")
+                # Comment out direct print statement - use logger instead
+                # print(f"[-] Access to {url} is denied by robots.txt")
                 return {"album_name": ERROR_MESSAGES["robots_txt_denied"], "files": []}
             
             # Make request with rate limiting, UA rotation, etc.
@@ -75,7 +76,8 @@ class CyberdropParser:
             )
                 
             if response.status_code != 200:
-                print(f"[-] HTTP error: {response.status_code} for URL: {url}")
+                # Comment out direct print statement - use logger instead
+                # print(f"[-] HTTP error: {response.status_code} for URL: {url}")
                 return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}
                 
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -100,9 +102,12 @@ class CyberdropParser:
                     file_links.append(href)
                     
             if not file_links:
-                print(f"[-] No downloadable items found in album: {url}")
+                # Comment out direct print statement - use logger instead
+                # print(f"[-] No downloadable items found in album: {url}")
+                pass
                 
             return {"album_name": album_name, "files": file_links}
         except Exception as e:
-            print(f"[-] Error parsing Cyberdrop album {url}: {str(e)}")
+            # Comment out direct print statement - use logger instead
+            # print(f"[-] Error parsing Cyberdrop album {url}: {str(e)}")
             return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}

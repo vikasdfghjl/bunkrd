@@ -11,7 +11,9 @@ A command-line tool to download files from Bunkr and Cyberdrop.
 - Error handling and retry mechanism
 - Proxy support for anonymous downloads
 - Rate limiting to avoid IP bans
-- Concurrent downloads for improved performance
+- Sequential downloads by default for better stability
+- Optional concurrent downloads mode for improved performance
+- Configurable delay between downloads to avoid rate limiting
 
 ## Installation
 
@@ -36,9 +38,9 @@ pip install -r requirements.txt
 ### Command-line options
 
 ```
-usage: bunkrdownloader [-h] [-u URL | -f FILE | -i] [-o OUTPUT] [--proxy PROXY]
+usage: bunkrd [-h] [-u URL | -f FILE | -i] [-o OUTPUT] [--proxy PROXY]
                       [--no-robots-check] [--min-delay MIN_DELAY] [--max-delay MAX_DELAY]
-                      [--concurrent CONCURRENT] [-v] [-q]
+                      [--concurrent-downloads] [--concurrent CONCURRENT] [-v] [-q]
 
 Download files from Bunkr and Cyberdrop.
 
@@ -55,36 +57,44 @@ optional arguments:
                         Minimum delay between requests in seconds (default: 1.0)
   --max-delay MAX_DELAY
                         Maximum delay between requests in seconds (default: 3.0)
+  --concurrent-downloads
+                        Enable concurrent downloads instead of sequential downloads
   --concurrent CONCURRENT
-                        Maximum concurrent downloads (default: 3)
+                        Maximum concurrent downloads (default: 3, only used with --concurrent-downloads)
   -v, --verbose         Increase output verbosity (can be used multiple times, e.g. -vvv)
   -q, --quiet           Suppress all output except errors
 ```
 
 ### Examples
 
-#### Download from a single URL
+#### Download from a single URL (sequential download)
 
 ```bash
-bunkrdownloader -u https://bunkr.sk/a/example-album -o ./downloads
+bunkrd -u https://bunkr.sk/a/example-album -o ./downloads
+```
+
+#### Download from a single URL with concurrent downloads
+
+```bash
+bunkrd -u https://bunkr.sk/a/example-album -o ./downloads --concurrent-downloads
 ```
 
 #### Download from multiple URLs in a file
 
 ```bash
-bunkrdownloader -f url_list.txt -o ./downloads
+bunkrd -f url_list.txt -o ./downloads
 ```
 
 #### Interactive mode
 
 ```bash
-bunkrdownloader -i -o ./downloads
+bunkrd -i -o ./downloads
 ```
 
-#### Using a proxy
+#### Using a proxy with concurrent downloads and custom thread count
 
 ```bash
-bunkrdownloader -u https://bunkr.sk/a/example-album --proxy socks5://127.0.0.1:9050
+bunkrd -u https://bunkr.sk/a/example-album --proxy socks5://127.0.0.1:9050 --concurrent-downloads --concurrent 5
 ```
 
 #### Using the original script name (for backward compatibility)
@@ -131,7 +141,7 @@ When contributing new features, please add appropriate tests:
 
 ```
 bunkrDownloader/
-├── bunkrdownloader/
+├── bunkrd/
 │   ├── __init__.py       # Package initialization
 │   ├── cli.py            # Command-line interface
 │   ├── config.py         # Configuration settings

@@ -65,8 +65,8 @@ class BunkrDownloader(BaseDownloader):
                 logger.debug(f"Encrypted URL length: {len(url_data) if url_data else 'None'}")
                 logger.debug(f"URL data first 30 chars: {url_data[:30] if url_data else 'None'}")
                 
-            # TEMPORARY: Dump raw encryption data to a file for analysis
-            self._dump_debug_info(slug, encryption_data)
+            # Comment out the debug data dump - for debugging purposes only
+            # self._dump_debug_info(slug, encryption_data)
             
             # Try the new direct URL method if URL field is available
             if 'url' in encryption_data and encryption_data['url'].startswith('http'):
@@ -94,6 +94,8 @@ class BunkrDownloader(BaseDownloader):
             slug (str): The file slug
             data (dict): The data to dump
         """
+        # Comment out debug info dump function - for debugging purposes only
+        '''
         try:
             debug_dir = os.path.join(os.getcwd(), 'debug_logs')
             os.makedirs(debug_dir, exist_ok=True)
@@ -105,6 +107,7 @@ class BunkrDownloader(BaseDownloader):
                 json.dump(data, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to dump debug info: {str(e)}")
+        '''
     
     def _get_encryption_data(self, slug):
         """
@@ -138,8 +141,8 @@ class BunkrDownloader(BaseDownloader):
                     data = json.loads(r._content)
                     logger.debug(f"Successfully parsed JSON response with keys: {list(data.keys())}")
                     
-                    # Print the full API response for analysis
-                    print(f"\t[DEBUG] API Response Keys: {list(data.keys())}")
+                    # Comment out debug print for production - for debugging purposes only
+                    # print(f"\t[DEBUG] API Response Keys: {list(data.keys())}")
                     
                     return data
                 except json.JSONDecodeError as e:

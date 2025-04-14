@@ -7,6 +7,7 @@ import os
 import gc
 import io
 import logging
+import datetime
 from tqdm import tqdm
 from ..config import (
     REQUEST_HEADERS, DEFAULT_RETRIES, 
@@ -87,7 +88,7 @@ class BaseDownloader:
             retries (int, optional): Number of retry attempts
             
         Returns:
-            bool: True if download was successful, False otherwise
+            bool or dict: True if download was successful (legacy mode), or a dict with download stats
         """
         try:
             # First, check robots.txt if enabled
@@ -108,6 +109,12 @@ class BaseDownloader:
             final_path = os.path.join(download_path, file_name)
             temp_path = f"{final_path}.part"
             
+            # Display current date and time when URL is fetched - ensure no blank lines
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{current_time}]")
+            print(f"FileName: {file_name}")
+            print(f"FileURL: {url}")
+            
             # Check if we have a partial download to resume
             resume_header = {}
             start_byte = 0
@@ -115,6 +122,13 @@ class BaseDownloader:
                 start_byte = os.path.getsize(temp_path)
                 resume_header = {'Range': f'bytes={start_byte}-'}
                 logger.info(f"Resuming download of {file_name} from byte {start_byte}")
+
+            # Track download speed
+            downloaded_bytes = start_byte
+            download_start_time = time.time()
+            download_speed = 0
+            last_update_time = download_start_time
+            last_update_bytes = start_byte
 
             try:
                 # Use the session with a proper timeout and larger stream parameter
@@ -165,8 +179,17 @@ class BaseDownloader:
                     mode = 'ab' if start_byte > 0 else 'wb'
                     
                     with open(temp_path, mode) as f:
-                        # Changed leave=False to leave=True to keep the progress bar visible
-                        with tqdm(total=file_size, initial=start_byte, unit='B', unit_scale=True, desc=file_name, leave=True) as pbar:
+                        # Configure tqdm to only show the progress bar
+                        # Set dynamic_ncols=True to adjust to terminal width
+                        with tqdm(
+                            total=file_size, 
+                            initial=start_byte, 
+                            unit='B', 
+                            unit_scale=True, 
+                            bar_format='{bar} {percentage:3.0f}% | {n_fmt}/{total_fmt} | {rate_fmt} | Elapsed: {elapsed}',
+                            dynamic_ncols=True,
+                            leave=True
+                        ) as pbar:
                             # Use optimized chunk size
                             for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
                                 if chunk:  # Filter out keep-alive new chunks
@@ -174,9 +197,27 @@ class BaseDownloader:
                                     f.flush()  # Ensure data is written to disk immediately
                                     pbar.update(len(chunk))
                                     
+                                    # Update download speed calculations
+                                    downloaded_bytes += len(chunk)
+                                    current_time = time.time()
+                                    if current_time - last_update_time >= 1.0:  # Update speed every second
+                                        chunk_time = current_time - last_update_time
+                                        chunk_bytes = downloaded_bytes - last_update_bytes
+                                        if chunk_time > 0:  # Avoid division by zero
+                                            download_speed = chunk_bytes / chunk_time
+                                        last_update_time = current_time
+                                        last_update_bytes = downloaded_bytes
+                            
                             # Explicitly flush at the end to ensure all data is written
                             f.flush()
                             os.fsync(f.fileno())
+                    
+                    # Calculate total download time and speed
+                    total_download_time = time.time() - download_start_time
+                    if total_download_time > 0:  # Avoid division by zero
+                        overall_speed = (downloaded_bytes - start_byte) / total_download_time
+                    else:
+                        overall_speed = 0
                     
                     # Rename the .part file to the final filename after successful download
                     if os.path.exists(temp_path):
@@ -198,8 +239,16 @@ class BaseDownloader:
 
                 # Mark as successfully downloaded
                 mark_as_downloaded(url, download_path)
-                logger.info(f"Successfully downloaded {file_name} ({downloaded_file_size} bytes)")
-                return True
+                logger.info(f"Successfully downloaded {file_name} ({downloaded_file_size} bytes) at {overall_speed/1024/1024:.2f} MB/s")
+                
+                # Return detailed stats instead of just True
+                return {
+                    'success': True,
+                    'file_name': file_name,
+                    'file_size': downloaded_file_size,
+                    'download_time': total_download_time,
+                    'speed': overall_speed
+                }
                 
             except requests.Timeout:
                 logger.error(ERROR_MESSAGES["timeout"].format(url=url))
@@ -223,14 +272,20 @@ class BaseDownloader:
             retries (int, optional): Number of retry attempts
             
         Returns:
-            bool: True if download was successful, False otherwise
+            bool or dict: True if download was successful (legacy mode), or a dict with download stats
         """
         for i in range(1, retries + 1):
             try:
                 logger.info(f"Downloading {url} (attempt {i}/{retries})")
-                success = self.download(url, download_path, file_name)
-                if success:
+                result = self.download(url, download_path, file_name)
+                
+                # Handle both legacy (bool) and new (dict) return types
+                if isinstance(result, dict):
+                    if result.get('success', False):
+                        return result
+                elif result:  # Legacy boolean return
                     return True
+                    
                 if i < retries:
                     # Use variable delay between retries (increasing with each attempt)
                     delay = 2 + (i - 1) * 0.5

@@ -27,9 +27,21 @@ def get_random_delay():
     """
     return random.uniform(MIN_REQUEST_DELAY, MAX_REQUEST_DELAY)
 
-def sleep_with_random_delay():
-    """Sleep for a random amount of time to simulate human behavior."""
-    delay = get_random_delay()
+def sleep_with_random_delay(min_delay=None, max_delay=None):
+    """
+    Sleep for a random amount of time to simulate human behavior.
+    
+    Args:
+        min_delay (float, optional): Minimum delay in seconds. If None, uses MIN_REQUEST_DELAY from config.
+        max_delay (float, optional): Maximum delay in seconds. If None, uses MAX_REQUEST_DELAY from config.
+        
+    Returns:
+        float: The actual delay used in seconds
+    """
+    min_delay = MIN_REQUEST_DELAY if min_delay is None else min_delay
+    max_delay = MAX_REQUEST_DELAY if max_delay is None else max_delay
+    
+    delay = random.uniform(min_delay, max_delay)
     time.sleep(delay)
     return delay
 
