@@ -179,8 +179,8 @@ class TestBunkrParser(unittest.TestCase):
         # Call the method
         result = self.parser.parse_album("https://bunkr.sk/a/test-album", use_incremental=True)
         
-        # Should handle the error gracefully
-        self.assertEqual(result["album_name"], "unknown_album")
+        # Should handle the error gracefully and use album ID from URL as fallback
+        self.assertEqual(result["album_name"], "bunkr_album_test-album")
         self.assertEqual(result["files"], [])
     
     @mock.patch('bunkrd.parsers.bunkr_parser.make_request_with_rate_limit')
@@ -228,8 +228,8 @@ class TestBunkrParser(unittest.TestCase):
         # Call the method - explicitly disable incremental parsing
         result = self.parser.parse_album("https://bunkr.sk/a/nonexistent", use_incremental=False)
         
-        # Assertions
-        self.assertEqual(result["album_name"], "Could not determine album name. Using 'unknown_album' as directory name.")
+        # Assertions - With our new functionality, we should be getting the album ID from the URL
+        self.assertEqual(result["album_name"], "bunkr_album_nonexistent")
         self.assertEqual(result["files"], [])
         mock_logger_error.assert_called_once()
     
@@ -289,8 +289,8 @@ class TestBunkrParser(unittest.TestCase):
         # Call the method - explicitly disable incremental parsing
         result = self.parser.parse_album("https://bunkr.sk/a/test-album", use_incremental=False)
         
-        # Assertions
-        self.assertEqual(result["album_name"], "Could not determine album name. Using 'unknown_album' as directory name.")
+        # Assertions - With our new functionality, we should be getting the album ID from the URL
+        self.assertEqual(result["album_name"], "bunkr_album_test-album")
         self.assertEqual(result["files"], [])
         mock_logger_exception.assert_called_once()
 
