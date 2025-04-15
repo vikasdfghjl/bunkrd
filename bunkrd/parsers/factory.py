@@ -39,3 +39,24 @@ class ParserFactory:
         else:
             # Default to BunkrParser for unknown URLs as a fallback strategy
             return BunkrParser(session, proxy_url)
+            
+    @staticmethod
+    def get_parser_with_options(url, session=None, proxy_url=None, use_incremental=True):
+        """
+        Get the appropriate parser for a given URL with additional options.
+        
+        This extended factory method allows specifying additional options like
+        whether to use incremental parsing for large pages.
+        
+        Args:
+            url (str): The URL to get a parser for - determines which parser type to create
+            session (requests.Session, optional): A session to use for the parser
+            proxy_url (str, optional): A proxy URL to use for the parser
+            use_incremental (bool, optional): Whether to use incremental parsing
+            
+        Returns:
+            tuple: (Parser instance, use_incremental flag)
+        """
+        parser = ParserFactory.get_parser(url, session, proxy_url)
+        # For very large pages, ensure incremental parsing is used
+        return parser, use_incremental

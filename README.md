@@ -14,7 +14,9 @@ A command-line tool to download files from Bunkr and Cyberdrop.
 - Proxy support for anonymous downloads
 - Rate limiting to avoid IP bans
 - Sequential downloads by default for better stability
-- Optional concurrent downloads mode for improved performance
+- Dynamic concurrent downloads with automatic thread scaling based on system resources
+- Intelligent memory and CPU usage monitoring to optimize performance
+- Incremental HTML parsing for handling extremely large album pages with minimal memory usage
 - Configurable delay between downloads to avoid rate limiting
 
 ## Installation
@@ -117,6 +119,26 @@ The tool shows real-time download speed information:
   - Average download speed across all files
   - Number of files skipped (already downloaded)
 
+### Dynamic Thread Scaling
+
+The concurrent download feature now includes intelligent thread scaling:
+
+- Automatically determines optimal number of threads based on:
+  - Available CPU cores and current system load
+  - Memory usage and availability
+  - Network performance and connection speed
+  - Download success rates and error patterns
+- Dynamically adjusts thread count during downloads:
+  - Increases threads on powerful machines with fast connections
+  - Reduces threads when system resources are constrained
+  - Scales down when errors or timeouts are detected
+  - Provides real-time feedback about thread adjustments
+- Benefits of dynamic scaling:
+  - Better performance on high-end systems
+  - More reliable downloads on resource-constrained devices
+  - Automatic adaptation to changing network conditions
+  - Improved success rates by reducing concurrency when needed
+
 ### Failed Download Tracking
 
 To prevent the tool from repeatedly attempting to download problematic files:
@@ -124,6 +146,18 @@ To prevent the tool from repeatedly attempting to download problematic files:
 - Failed downloads are marked with a `[FAILED]` tag in the `already_downloaded.txt` file
 - When running the tool again, these files will be skipped with a "Skipped (Failed Previously)" message
 - To retry downloading a failed file, simply remove its entry from the `already_downloaded.txt` file
+
+### Incremental HTML Parser
+
+The application now uses an incremental HTML parser for album pages, which offers significant benefits:
+
+- **Memory Efficiency**: Processes HTML content in chunks (8KB by default) rather than loading the entire page into memory
+- **Large Album Support**: Handles extremely large albums (1000+ files) without running out of memory
+- **Progressive Processing**: Extracts file URLs as they're found rather than waiting for the entire page to load
+- **Reliable Operation**: Can recover partial results even if parsing is interrupted due to network errors
+- **Real-time Progress**: Shows file discovery progress during parsing for better feedback
+
+This feature is especially valuable when downloading from albums containing hundreds or thousands of files, as it allows the application to run smoothly even on systems with limited RAM.
 
 ## Testing
 

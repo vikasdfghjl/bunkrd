@@ -4,6 +4,7 @@ Parser for Bunkr album pages.
 import re
 import requests
 from bs4 import BeautifulSoup
+from html.parser import HTMLParser
 from urllib.parse import urljoin
 import logging
 from ..config import (
@@ -13,9 +14,9 @@ from ..config import (
 )
 from ..utils.file_utils import remove_illegal_chars
 from ..utils.request_utils import (
-    create_session_with_random_ua, add_proxy_to_session,
     make_request_with_rate_limit, can_fetch
 )
+from ..utils.session_factory import SessionFactory
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -45,12 +46,9 @@ class BunkrParser:
         Returns:
             requests.Session: A new session with random user agent and proxy if configured
         """
-        session = create_session_with_random_ua()
-        if self.proxy_url:
-            session = add_proxy_to_session(session, self.proxy_url)
-        return session
+        return SessionFactory.create_session(self.proxy_url)
     
-    def parse_album(self, url):
+    def parse_album(self, url, use_incremental=True):
         """
         Parse a Bunkr album page and extract file information.
         
@@ -60,6 +58,7 @@ class BunkrParser:
         
         Args:
             url (str): The URL of the Bunkr album
+            use_incremental (bool, optional): Whether to use incremental parsing for large pages
             
         Returns:
             dict: Dictionary containing:
@@ -83,6 +82,26 @@ class BunkrParser:
                 logger.warning(f"Access to {url} is denied by robots.txt")
                 return {"album_name": ERROR_MESSAGES["robots_txt_denied"], "files": []}
             
+            if use_incremental:
+                return self._parse_album_incremental(url)
+            else:
+                return self._parse_album_traditional(url)
+        except Exception as e:
+            # Catch and log any unexpected exceptions to prevent crash
+            logger.exception(f"Error parsing Bunkr album {url}: {str(e)}")
+            return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}
+            
+    def _parse_album_traditional(self, url):
+        """
+        Parse album using traditional BeautifulSoup method (loads entire HTML into memory).
+        
+        Args:
+            url (str): The URL of the Bunkr album
+            
+        Returns:
+            dict: Dictionary containing album_name and files
+        """
+        try:
             # Make request with rate limiting, UA rotation, etc. to avoid detection and IP bans
             response = make_request_with_rate_limit(
                 self.session, 
@@ -144,22 +163,174 @@ class BunkrParser:
                         file_links.append(urljoin('https://bunkr.sk', href))
             
             # Log detailed debug info if no files were found despite all strategies
-            # This helps diagnose site changes that break the parser
             if not file_links:
                 logger.warning(f"No downloadable items found in album: {url}")
-                # Comment out debug info section - for debugging purposes only
-                '''
-                # Print some debug info about page structure to help diagnose issues
-                all_links = soup.find_all('a', href=True)
-                logger.debug(f"Found {len(all_links)} total links in the page")
-                for i, link in enumerate(all_links[:10]):  # First 10 links only
-                    logger.debug(f"Link {i}: {link.get('href')} - Classes: {link.get('class')} - Text: {link.text.strip()[:30]}")
-                '''
             else:
                 logger.info(f"Found {len(file_links)} files in album")
                 
             return {"album_name": album_name, "files": file_links}
         except Exception as e:
             # Catch and log any unexpected exceptions to prevent crash
-            logger.exception(f"Error parsing Bunkr album {url}: {str(e)}")
+            logger.exception(f"Error in traditional parsing for {url}: {str(e)}")
             return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}
+    
+    def _parse_album_incremental(self, url):
+        """
+        Parse album using incremental HTML parsing to reduce memory usage.
+        Perfect for extremely large album pages.
+        
+        Args:
+            url (str): The URL of the Bunkr album
+            
+        Returns:
+            dict: Dictionary containing album_name and files
+        """
+        logger.info(f"Using incremental HTML parser for: {url}")
+        
+        # Create an incremental HTML parser to process the content in chunks
+        incremental_parser = BunkrIncrementalParser(base_url='https://bunkr.sk')
+        
+        try:
+            # Stream the response to process it incrementally
+            response = self.session.get(url, stream=True, timeout=30)
+            
+            # Handle HTTP errors (404, 403, etc.)
+            if response.status_code != 200:
+                logger.error(f"HTTP error: {response.status_code} for URL: {url}")
+                return {"album_name": ERROR_MESSAGES["unknown_album"], "files": []}
+            
+            # Process the HTML content in chunks to reduce memory usage
+            chunk_size = 8192  # 8KB chunks
+            for chunk in response.iter_content(chunk_size=chunk_size, decode_unicode=True):
+                if chunk:  # Filter out keep-alive chunks
+                    incremental_parser.feed(chunk)
+                    
+                    # Periodically log progress for large albums
+                    if len(incremental_parser.file_links) > 0 and len(incremental_parser.file_links) % 50 == 0:
+                        logger.debug(f"Incremental parser: found {len(incremental_parser.file_links)} files so far")
+            
+            # Clean up the parser once we're done
+            incremental_parser.close()
+            
+            album_name = incremental_parser.album_name
+            if not album_name or album_name.strip() == "":
+                album_name = "unknown_album"
+            else:
+                album_name = remove_illegal_chars(album_name)
+            
+            file_links = incremental_parser.file_links
+            
+            # Apply regex-based filtering as a final step for quality control
+            filtered_links = []
+            for link in file_links:
+                if '/f/' in link or '/a/' in link or '/d/' in link:
+                    filtered_links.append(link)
+                elif re.search(r'/(f|a|d)/[a-zA-Z0-9]{8,}', link):
+                    filtered_links.append(link)
+            
+            logger.info(f"Incremental parser completed: found {len(filtered_links)} files in album")
+            return {"album_name": album_name, "files": filtered_links}
+            
+        except Exception as e:
+            logger.exception(f"Error in incremental parsing for {url}: {str(e)}")
+            # Return whatever we've managed to parse so far, if anything
+            album_name = incremental_parser.album_name or "unknown_album"
+            album_name = remove_illegal_chars(album_name)
+            return {
+                "album_name": album_name, 
+                "files": incremental_parser.file_links
+            }
+
+
+class BunkrIncrementalParser(HTMLParser):
+    """
+    Custom incremental HTML parser for Bunkr albums.
+    Processes HTML in chunks to minimize memory usage.
+    """
+    
+    def __init__(self, base_url=None):
+        """
+        Initialize the incremental parser.
+        
+        Args:
+            base_url (str, optional): Base URL to use for resolving relative links
+        """
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url or 'https://bunkr.sk'
+        self.in_h1 = False
+        self.h1_class = None
+        self.album_name = None
+        self.file_links = []
+        self.current_link = None
+        self.current_classes = []
+        self.in_title = False
+        self.title_text = ""
+    
+    def handle_starttag(self, tag, attrs):
+        """Process the opening tag and its attributes."""
+        attrs_dict = dict(attrs)
+        
+        if tag == 'title':
+            self.in_title = True
+            self.title_text = ""
+            return
+        
+        # Track h1 tags for album name
+        if tag == 'h1':
+            self.in_h1 = True
+            if 'class' in attrs_dict:
+                self.h1_class = attrs_dict['class']
+            return
+            
+        # Track anchor tags for potential file links
+        if tag == 'a' and 'href' in attrs_dict:
+            href = attrs_dict['href']
+            self.current_link = href
+            self.current_classes = attrs_dict.get('class', '').split() if 'class' in attrs_dict else []
+            
+            # Process link immediately if it's a file link
+            if href and ('/f/' in href or '/a/' in href or '/d/' in href):
+                full_url = urljoin(self.base_url, href)
+                if full_url not in self.file_links:
+                    self.file_links.append(full_url)
+            # Use regex pattern for more permissive matching
+            elif href and re.search(r'/(f|a|d)/[a-zA-Z0-9]{8,}', href):
+                full_url = urljoin(self.base_url, href)
+                if full_url not in self.file_links:
+                    self.file_links.append(full_url)
+    
+    def handle_endtag(self, tag):
+        """Process the closing tag."""
+        if tag == 'h1':
+            self.in_h1 = False
+            self.h1_class = None
+        elif tag == 'title':
+            self.in_title = False
+            # If we haven't found an album name from h1, try to extract from title
+            if not self.album_name and self.title_text:
+                # Extract album name from title - usually in "Album Name - Bunkr" format
+                title_parts = self.title_text.split(' - ')
+                if len(title_parts) > 1:
+                    self.album_name = title_parts[0].strip()
+        elif tag == 'a':
+            self.current_link = None
+            self.current_classes = []
+    
+    def handle_data(self, data):
+        """Process the text content."""
+        # Capture text in h1 as the album name
+        if self.in_h1 and not self.album_name:
+            if self.h1_class and 'block truncate' in self.h1_class:
+                # This is the primary album name selector
+                self.album_name = data.strip()
+            elif not self.h1_class:
+                # Fallback selector
+                self.album_name = data.strip()
+        
+        # Capture title text
+        if self.in_title:
+            self.title_text += data
+    
+    def error(self, message):
+        """Handle parsing errors gracefully."""
+        logger.warning(f"HTML parser error: {message}")

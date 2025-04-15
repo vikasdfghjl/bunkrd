@@ -16,14 +16,27 @@ from ..config import (
 )
 from ..utils.file_utils import get_url_data, mark_as_downloaded
 from ..utils.request_utils import (
-    create_session_with_random_ua, add_proxy_to_session,
-    sleep_with_random_delay, get_random_user_agent,
-    can_fetch, make_request_with_rate_limit
+    sleep_with_random_delay,
+    can_fetch, make_request_with_rate_limit,
+    measure_connection_speed,
+    check_memory_usage,
+    clear_memory_for_large_download
 )
+from ..utils.session_factory import SessionFactory
 
-# Optimized chunk size for better performance with large files
-# 1MB chunks balance memory usage and performance
-CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+# Chunk size constants
+MIN_CHUNK_SIZE = 64 * 1024     # 64 KB
+DEFAULT_CHUNK_SIZE = 1024 * 1024  # 1 MB
+MAX_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
+
+# Memory thresholds for triggering collection during download
+MEMORY_CHECK_FREQUENCY = 50  # Check memory every N chunks
+LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100 MB
+
+# Connection speed thresholds in bytes/second
+SLOW_CONNECTION = 256 * 1024    # 256 KB/s
+MEDIUM_CONNECTION = 1024 * 1024  # 1 MB/s
+FAST_CONNECTION = 5 * 1024 * 1024  # 5 MB/s
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -48,6 +61,8 @@ class BaseDownloader:
         """
         self.proxy_url = proxy_url if proxy_url is not None else (DEFAULT_PROXY if USE_PROXY else None)
         self.session = session if session else self.create_session()
+        self.connection_speed = None
+        self.adaptive_chunk_size = DEFAULT_CHUNK_SIZE
     
     def create_session(self):
         """
@@ -56,16 +71,8 @@ class BaseDownloader:
         Returns:
             requests.Session: A new session object
         """
-        # Create session with random user agent
-        session = create_session_with_random_ua()
-        
-        # Add proxy if configured
-        if self.proxy_url:
-            logger.info(f"Using proxy: {self.proxy_url}")
-            session = add_proxy_to_session(session, self.proxy_url)
-            
-        return session
-
+        return SessionFactory.create_session(self.proxy_url)
+    
     def refresh_session(self):
         """
         Refresh the session with a new user agent.
@@ -73,9 +80,69 @@ class BaseDownloader:
         Returns:
             requests.Session: The refreshed session
         """
-        self.session.headers['User-Agent'] = get_random_user_agent()
-        logger.debug(f"Refreshed user agent: {self.session.headers['User-Agent'][:30]}...")
-        return self.session
+        return SessionFactory.refresh_session(self.session)
+
+    def get_adaptive_chunk_size(self, url=None):
+        """
+        Calculate optimal chunk size based on connection speed.
+        
+        If no connection speed measurement is available, this will
+        measure the connection speed to the given URL.
+        
+        Args:
+            url (str, optional): URL to measure connection speed with
+            
+        Returns:
+            int: Optimal chunk size in bytes
+        """
+        # Use existing speed measurement if available and recent
+        if not self.connection_speed and url:
+            self.connection_speed = measure_connection_speed(self.session, url)
+        
+        # If we couldn't measure speed, use default chunk size
+        if not self.connection_speed:
+            logger.debug("Could not measure connection speed. Using default chunk size.")
+            return DEFAULT_CHUNK_SIZE
+            
+        # Calculate optimal chunk size based on connection speed
+        if self.connection_speed < SLOW_CONNECTION:
+            # For slow connections, use smaller chunks
+            chunk_size = MIN_CHUNK_SIZE
+            logger.debug(f"Slow connection detected ({self.connection_speed/1024:.1f} KB/s). Using {chunk_size/1024:.1f} KB chunks.")
+        elif self.connection_speed < MEDIUM_CONNECTION:
+            # For medium connections, scale between MIN and DEFAULT
+            scale_factor = (self.connection_speed - SLOW_CONNECTION) / (MEDIUM_CONNECTION - SLOW_CONNECTION)
+            chunk_size = MIN_CHUNK_SIZE + scale_factor * (DEFAULT_CHUNK_SIZE - MIN_CHUNK_SIZE)
+            logger.debug(f"Medium connection detected ({self.connection_speed/1024/1024:.2f} MB/s). Using {chunk_size/1024:.1f} KB chunks.")
+        elif self.connection_speed < FAST_CONNECTION:
+            # For faster connections, scale between DEFAULT and MAX
+            scale_factor = (self.connection_speed - MEDIUM_CONNECTION) / (FAST_CONNECTION - MEDIUM_CONNECTION)
+            chunk_size = DEFAULT_CHUNK_SIZE + scale_factor * (MAX_CHUNK_SIZE - DEFAULT_CHUNK_SIZE)
+            logger.debug(f"Fast connection detected ({self.connection_speed/1024/1024:.2f} MB/s). Using {chunk_size/1024/1024:.2f} MB chunks.")
+        else:
+            # For very fast connections, use maximum chunk size
+            chunk_size = MAX_CHUNK_SIZE
+            logger.debug(f"Very fast connection detected ({self.connection_speed/1024/1024:.2f} MB/s). Using {chunk_size/1024/1024:.2f} MB chunks.")
+            
+        return int(chunk_size)
+    
+    def update_connection_speed(self, bytes_downloaded, download_time):
+        """
+        Update the connection speed measurement based on actual download data.
+        
+        Args:
+            bytes_downloaded (int): Number of bytes downloaded
+            download_time (float): Time taken to download in seconds
+        """
+        if download_time > 0 and bytes_downloaded > 0:
+            # Calculate speed as moving average (30% new, 70% previous)
+            new_speed = bytes_downloaded / download_time
+            if self.connection_speed:
+                self.connection_speed = 0.3 * new_speed + 0.7 * self.connection_speed
+            else:
+                self.connection_speed = new_speed
+                
+            logger.debug(f"Updated connection speed: {self.connection_speed/1024/1024:.2f} MB/s")
     
     def download(self, url, download_path, file_name=None, retries=DEFAULT_RETRIES):
         """
@@ -109,11 +176,11 @@ class BaseDownloader:
             final_path = os.path.join(download_path, file_name)
             temp_path = f"{final_path}.part"
             
-            # Display current date and time when URL is fetched - ensure no blank lines
+            # Log download information instead of printing
             current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{current_time}]")
-            print(f"FileName: {file_name}")
-            print(f"FileURL: {url}")
+            logger.info(f"[{current_time}] Starting download")
+            logger.info(f"FileName: {file_name}")
+            logger.info(f"FileURL: {url}")
             
             # Check if we have a partial download to resume
             resume_header = {}
@@ -123,12 +190,29 @@ class BaseDownloader:
                 resume_header = {'Range': f'bytes={start_byte}-'}
                 logger.info(f"Resuming download of {file_name} from byte {start_byte}")
 
+            # Determine optimal chunk size for this connection
+            self.adaptive_chunk_size = self.get_adaptive_chunk_size(url)
+
             # Track download speed
             downloaded_bytes = start_byte
             download_start_time = time.time()
             download_speed = 0
             last_update_time = download_start_time
             last_update_bytes = start_byte
+            
+            # Make initial HEAD request to get file size
+            try:
+                with self.session.head(url, timeout=10, headers=resume_header) as head_resp:
+                    if 'content-length' in head_resp.headers:
+                        file_size = int(head_resp.headers.get('content-length', 0))
+                        
+                        # If file is large, prepare memory
+                        if file_size > LARGE_FILE_THRESHOLD:
+                            logger.info(f"Large file detected ({file_size/1024/1024:.1f} MB). Preparing memory.")
+                            clear_memory_for_large_download()
+            except Exception:
+                # If HEAD request fails, we'll still try the GET request
+                file_size = -1
 
             try:
                 # Use the session with a proper timeout and larger stream parameter
@@ -153,7 +237,7 @@ class BaseDownloader:
                             os.remove(temp_path)
                         return self.download(url, download_path, file_name, retries)
                         
-                    if r.status_code not in (200, 201, 204, 206):
+                    if not (200 <= r.status_code < 300):
                         logger.error(ERROR_MESSAGES["http_error"].format(
                             code=r.status_code, 
                             message=r.reason
@@ -174,6 +258,10 @@ class BaseDownloader:
                             file_size = start_byte + int(r.headers.get('content-length', 0))
                     else:
                         file_size = int(r.headers.get('content-length', -1))
+                    
+                    # For large files, prepare memory again if not already done
+                    if file_size > LARGE_FILE_THRESHOLD:
+                        clear_memory_for_large_download()
                     
                     # Open the file in append mode if resuming, otherwise write mode
                     mode = 'ab' if start_byte > 0 else 'wb'
@@ -198,23 +286,47 @@ class BaseDownloader:
                         }
                         
                         with tqdm(**tqdm_kwargs) as pbar:
-                            # Use optimized chunk size
-                            for chunk in r.iter_content(chunk_size=CHUNK_SIZE):
+                            # Use adaptive chunk size
+                            chunk_count = 0
+                            current_chunk_size = self.adaptive_chunk_size
+                            
+                            for chunk in r.iter_content(chunk_size=current_chunk_size):
                                 if chunk:  # Filter out keep-alive new chunks
                                     f.write(chunk)
                                     f.flush()  # Ensure data is written to disk immediately
-                                    pbar.update(len(chunk))
+                                    chunk_size = len(chunk)
+                                    pbar.update(chunk_size)
                                     
                                     # Update download speed calculations
-                                    downloaded_bytes += len(chunk)
+                                    downloaded_bytes += chunk_size
                                     current_time = time.time()
-                                    if current_time - last_update_time >= 1.0:  # Update speed every second
-                                        chunk_time = current_time - last_update_time
-                                        chunk_bytes = downloaded_bytes - last_update_bytes
-                                        if chunk_time > 0:  # Avoid division by zero
-                                            download_speed = chunk_bytes / chunk_time
-                                        last_update_time = current_time
-                                        last_update_bytes = downloaded_bytes
+                                    chunk_count += 1
+                                    
+                                    # Check memory usage periodically
+                                    if chunk_count % MEMORY_CHECK_FREQUENCY == 0:
+                                        check_memory_usage()
+                                    
+                                    # Every 10 chunks, reassess connection speed and chunk size
+                                    if chunk_count % 10 == 0:
+                                        if current_time - last_update_time >= 1.0:  # Update at least once per second
+                                            chunk_time = current_time - last_update_time
+                                            chunk_bytes = downloaded_bytes - last_update_bytes
+                                            
+                                            if chunk_time > 0:  # Avoid division by zero
+                                                # Update connection speed
+                                                download_speed = chunk_bytes / chunk_time
+                                                self.update_connection_speed(chunk_bytes, chunk_time)
+                                                
+                                                # Adjust chunk size based on new speed measurement
+                                                new_chunk_size = self.get_adaptive_chunk_size()
+                                                
+                                                # Gradually change chunk size to avoid sudden jumps
+                                                if new_chunk_size != current_chunk_size:
+                                                    current_chunk_size = int(0.7 * current_chunk_size + 0.3 * new_chunk_size)
+                                                    logger.debug(f"Adjusted chunk size to {current_chunk_size/1024:.1f} KB")
+                                                
+                                            last_update_time = current_time
+                                            last_update_bytes = downloaded_bytes
                             
                             # Explicitly flush at the end to ensure all data is written
                             f.flush()
@@ -227,12 +339,16 @@ class BaseDownloader:
                     else:
                         overall_speed = 0
                     
+                    # Update connection speed for future downloads
+                    self.update_connection_speed(downloaded_bytes - start_byte, total_download_time)
+                    
                     # Rename the .part file to the final filename after successful download
                     if os.path.exists(temp_path):
                         os.rename(temp_path, final_path)
 
-                    # Force garbage collection to free up memory
-                    gc.collect()
+                    # Force garbage collection to free up memory after the download
+                    # This helps prevent memory fragmentation when downloading many files
+                    check_memory_usage(force_collect=True)
                     
                 # Verify file integrity
                 if file_size > -1:
@@ -255,7 +371,8 @@ class BaseDownloader:
                     'file_name': file_name,
                     'file_size': downloaded_file_size,
                     'download_time': total_download_time,
-                    'speed': overall_speed
+                    'speed': overall_speed,
+                    'final_chunk_size': current_chunk_size
                 }
                 
             except requests.Timeout:
@@ -264,11 +381,14 @@ class BaseDownloader:
             except requests.RequestException as e:
                 logger.error(ERROR_MESSAGES["network_error"].format(url=url, error=str(e)))
                 return False
+            finally:
+                # Clean up any large response objects still in memory
+                check_memory_usage(force_collect=True)
                 
         except Exception as e:
             logger.error(ERROR_MESSAGES["download_error"].format(url=url, error=str(e)))
             return False
-            
+
     def download_with_retry(self, url, download_path, file_name=None, retries=DEFAULT_RETRIES):
         """
         Download a file with multiple retry attempts.
@@ -285,6 +405,11 @@ class BaseDownloader:
         for i in range(1, retries + 1):
             try:
                 logger.info(f"Downloading {url} (attempt {i}/{retries})")
+                
+                # Ensure we have clean memory before each attempt
+                if i > 1:  # Only force collection on retry attempts
+                    check_memory_usage(force_collect=True)
+                
                 result = self.download(url, download_path, file_name)
                 
                 # Handle both legacy (bool) and new (dict) return types
@@ -313,19 +438,32 @@ class BaseDownloader:
         """
         Make an API request with rate limiting and other protections.
         
+        This method returns a context manager that can be used with 'with' statements
+        to ensure proper resource cleanup after the request completes.
+        
         Args:
             method (str): HTTP method (get, post, etc.)
             url (str): URL to request
             **kwargs: Additional arguments to pass to the request method
             
         Returns:
-            requests.Response: The response from the server
+            requests.Response: The response from the server that can be used as a context manager
         """
         logger.debug(f"Making API request: {method.upper()} {url}")
-        return make_request_with_rate_limit(
-            self.session, 
-            method, 
-            url, 
-            check_robots=RESPECT_ROBOTS_TXT,
-            **kwargs
-        )
+        
+        # Check memory before API requests to prevent OOM during large responses
+        check_memory_usage()
+        
+        try:
+            response = make_request_with_rate_limit(
+                self.session, 
+                method, 
+                url, 
+                check_robots=RESPECT_ROBOTS_TXT,
+                **kwargs
+            )
+            return response
+        finally:
+            # Clean up potential large JSON responses after request
+            if not kwargs.get('stream', False):
+                check_memory_usage()

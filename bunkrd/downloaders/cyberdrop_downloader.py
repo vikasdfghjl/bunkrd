@@ -1,7 +1,11 @@
 """
 Cyberdrop downloader implementation.
 """
+import logging
 from .base_downloader import BaseDownloader
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 class CyberdropDownloader(BaseDownloader):
     """
@@ -28,5 +32,5 @@ class CyberdropDownloader(BaseDownloader):
             url = url if url.startswith('http') else f'https:{url}'
             return {'url': url, 'size': -1}
         except Exception as e:
-            print(f"\t[-] Error processing Cyberdrop URL: {str(e)}")
+            logger.error(f"Error processing Cyberdrop URL: {str(e)}")
             return None

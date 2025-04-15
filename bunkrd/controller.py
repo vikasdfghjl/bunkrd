@@ -7,6 +7,7 @@ import re
 import requests
 import concurrent.futures
 import logging
+import gc
 from urllib.parse import urlparse, urljoin
 from tqdm import tqdm
 
@@ -20,9 +21,15 @@ from .utils.file_utils import (
 from .utils.request_utils import (
     create_session_with_random_ua,
     add_proxy_to_session,
-    sleep_with_random_delay
+    sleep_with_random_delay,
+    check_memory_usage,
+    clear_memory_for_large_download
 )
 from .config import USE_PROXY, DEFAULT_PROXY, DEFAULT_CONCURRENT_DOWNLOADS, CONCURRENT_DELAY
+
+# Memory management constants 
+MEMORY_CHECK_INTERVAL = 3  # Check memory every N files in batch operations
+MAX_BATCH_SIZE = 50  # Split large batches into smaller chunks
 
 # Import our new formatting functions from cli module
 try:
@@ -95,6 +102,9 @@ class DownloadController:
         
         # Configure logger to output to file instead of console
         self._configure_logging(log_level)
+
+        # Initialize memory management
+        self.memory_check_counter = 0
         
     def _configure_logging(self, log_level):
         """
@@ -194,6 +204,9 @@ class DownloadController:
             bool: True if processing was successful, False otherwise
         """
         try:
+            # Ensure memory is clean before processing a URL
+            check_memory_usage()
+            
             # Ensure URL has http scheme - automatically prepend https:// if missing
             if not url.startswith('http'):
                 url = f'https://{url}'
@@ -219,6 +232,9 @@ class DownloadController:
             logger.error(error_msg)
             print(f"\n{draw_box(error_msg, title='Error', color='red')}\n")
             return False
+        finally:
+            # Always clean up after URL processing to prevent memory leaks
+            check_memory_usage(force_collect=True)
             
     def process_file(self, file_path, download_dir=None):
         """
@@ -232,6 +248,9 @@ class DownloadController:
             bool: True if all URLs were processed successfully, False otherwise
         """
         try:
+            # Clean memory before starting batch processing
+            clear_memory_for_large_download()
+            
             # Validate file_path to prevent directory traversal
             file_path = os.path.abspath(os.path.normpath(file_path))
             if not os.path.exists(file_path) or not os.path.isfile(file_path):
@@ -254,22 +273,40 @@ class DownloadController:
             )
             print(f"\n{info_box}\n")
             
-            success_count = 0
-            
-            with tqdm(total=len(urls), desc="Overall Progress", unit="urls") as pbar:
-                for i, url in enumerate(urls):
-                    # Display URL being processed - remove extra newline
-                    print(f"{format_text('URL', 'cyan')} {i+1}/{len(urls)}: {format_text(url, 'yellow')}")
-                    print(format_text('─' * (len(url) + 20), 'blue'))
+            # Split large batches into smaller chunks for better memory management
+            if len(urls) > MAX_BATCH_SIZE:
+                logger.info(f"Large batch detected ({len(urls)} URLs). Splitting into smaller chunks.")
+                
+                # Process URLs in chunks to prevent memory leaks
+                batch_size = MAX_BATCH_SIZE
+                url_batches = [urls[i:i + batch_size] for i in range(0, len(urls), batch_size)]
+                
+                success_count = 0
+                batch_count = len(url_batches)
+                
+                for batch_idx, batch in enumerate(url_batches):
+                    # Force garbage collection between batches
+                    if batch_idx > 0:
+                        clear_memory_for_large_download()
+                        logger.info(f"Memory cleared between batches. Starting batch {batch_idx+1}/{batch_count}")
                     
-                    logger.info(f"Processing URL: {url}")
-                    if self.process_url(url, download_dir):
-                        success_count += 1
-                    pbar.update(1)
+                    batch_header = draw_box(
+                        f"Processing batch {batch_idx+1}/{batch_count} ({len(batch)} URLs)",
+                        title="Batch Processing", color="cyan"
+                    )
+                    print(f"\n{batch_header}\n")
                     
-                    # Add a separator between URLs for clearer output
-                    if i < len(urls) - 1:
-                        print(format_text('\n' + '─' * 60 + '\n', 'blue'))
+                    # Process this batch
+                    batch_success = self._process_url_batch(batch, download_dir, len(urls), 
+                                                          start_index=batch_idx*batch_size)
+                    success_count += batch_success
+                    
+                    # Summary for this batch
+                    batch_summary = f"Batch {batch_idx+1}/{batch_count}: {batch_success}/{len(batch)} successful"
+                    print(f"\n{draw_box(batch_summary, title='Batch Complete', color='cyan')}\n")
+            else:
+                # Small enough batch to process directly
+                success_count = self._process_url_batch(urls, download_dir, len(urls))
                 
             # Show final summary in a box
             result = f"{success_count}/{len(urls)} URLs processed successfully"
@@ -289,6 +326,50 @@ class DownloadController:
             logger.error(error_msg)
             print(f"\n{draw_box(error_msg, title='Error', color='red')}\n")
             return False
+        finally:
+            # Ensure memory is cleaned up after batch processing
+            clear_memory_for_large_download()
+            
+    def _process_url_batch(self, urls, download_dir, total_urls=None, start_index=0):
+        """
+        Process a batch of URLs with memory management.
+        
+        Args:
+            urls (list): List of URLs to process
+            download_dir (str): Directory to download files to
+            total_urls (int, optional): Total number of URLs in all batches combined
+            start_index (int, optional): Starting index for progress tracking
+            
+        Returns:
+            int: Number of successfully processed URLs
+        """
+        success_count = 0
+        total_count = total_urls if total_urls is not None else len(urls)
+        
+        with tqdm(total=len(urls), desc="Batch Progress", unit="urls") as pbar:
+            for i, url in enumerate(urls):
+                # Display URL being processed - remove extra newline
+                url_idx = start_index + i + 1
+                print(f"{format_text('URL', 'cyan')} {url_idx}/{total_count}: {format_text(url, 'yellow')}")
+                print(format_text('─' * (len(url) + 20), 'blue'))
+                
+                logger.info(f"Processing URL: {url}")
+                
+                # Periodically check and clean memory during batch processing
+                self.memory_check_counter += 1
+                if self.memory_check_counter >= MEMORY_CHECK_INTERVAL:
+                    check_memory_usage() 
+                    self.memory_check_counter = 0
+                    
+                if self.process_url(url, download_dir):
+                    success_count += 1
+                pbar.update(1)
+                
+                # Add a separator between URLs for clearer output
+                if i < len(urls) - 1:
+                    print(format_text('\n' + '─' * 60 + '\n', 'blue'))
+                    
+        return success_count
             
     def _process_album(self, album_url, download_dir=None):
         """
@@ -349,6 +430,15 @@ class DownloadController:
                 logger.info(complete_msg)
                 print(f"\n{draw_box(complete_msg, title='Complete', color='green')}\n")
                 return True
+                
+            # For large albums, prepare memory
+            if len(files_to_download) > 10:
+                clear_memory_for_large_download()
+            
+            # Split large albums into smaller batches for better memory management
+            if len(files_to_download) > MAX_BATCH_SIZE and self.max_concurrent_downloads > 1:
+                logger.info(f"Large album detected ({len(files_to_download)} files). Using batched concurrent download.")
+                return self._download_files_in_batches(files_to_download, album_download_dir)
             
             # Download files based on concurrency setting
             if self.max_concurrent_downloads > 1:
@@ -357,15 +447,19 @@ class DownloadController:
             else:
                 # Download files sequentially one by one
                 return self._download_files_sequentially(files_to_download, album_download_dir)
+                
         except Exception as e:
             error_msg = f"Error processing album {album_url}: {str(e)}"
             logger.error(error_msg)
             print(f"\n{draw_box(error_msg, title='Error', color='red')}\n")
             return False
+        finally:
+            # Clean up memory after album processing
+            check_memory_usage(force_collect=True)
             
-    def _download_files_concurrently(self, file_urls, download_dir):
+    def _download_files_in_batches(self, file_urls, download_dir):
         """
-        Download multiple files concurrently using a thread pool.
+        Download files in batches to better manage memory for large albums.
         
         Args:
             file_urls (list): List of file URLs to download
@@ -376,6 +470,101 @@ class DownloadController:
         """
         if not file_urls:
             return True
+            
+        # Create a header for the batched download
+        batch_size = min(MAX_BATCH_SIZE, len(file_urls))
+        batch_count = (len(file_urls) + batch_size - 1) // batch_size
+        
+        header = draw_box(
+            f"Total files: {len(file_urls)}\n"
+            f"Download path: {os.path.abspath(download_dir)}\n"
+            f"Mode: Batched concurrent downloads ({batch_count} batches)",
+            title="Batch Download Starting", color="blue", padding=1
+        )
+        print(f"\n{header}\n")
+        
+        logger.info(f"Starting batched concurrent downloads with {batch_count} batches of {batch_size} files max")
+        
+        total_success = 0
+        total_errors = 0
+        total_size = 0
+        total_time = 0
+        
+        # Process files in batches
+        for i in range(0, len(file_urls), batch_size):
+            batch = file_urls[i:i+batch_size]
+            batch_num = (i // batch_size) + 1
+            
+            # Clear memory before each batch
+            if i > 0:
+                clear_memory_for_large_download()
+                
+            # Log batch info
+            batch_header = draw_box(
+                f"Processing batch {batch_num}/{batch_count} ({len(batch)} files)",
+                title="Batch", color="cyan"
+            )
+            print(f"\n{batch_header}\n")
+            logger.info(f"Starting batch {batch_num}/{batch_count} with {len(batch)} files")
+            
+            # Process this batch
+            result = self._download_files_concurrently(batch, download_dir, is_batch=True)
+            
+            # If result is a dict (success stats)
+            if isinstance(result, dict):
+                total_success += result.get('success', 0)
+                total_errors += result.get('errors', 0)
+                total_size += result.get('total_size', 0)
+                total_time += result.get('total_time', 0)
+            # If result is a boolean (old style)
+            elif result:
+                total_success += len(batch)
+            else:
+                # Assume some errors if we got a False result
+                total_success += max(0, len(batch) - 1)  # Estimate
+                total_errors += 1  # At least one error
+                
+            # Show batch completion
+            batch_summary = f"Batch {batch_num}/{batch_count} complete"
+            print(f"\n{draw_box(batch_summary, title='Batch Complete', color='cyan')}\n")
+            
+        # Calculate overall stats
+        if total_time > 0 and total_size > 0:
+            avg_speed = total_size / total_time
+            speed_str = f"\nAverage download speed: {avg_speed/(1024*1024):.2f} MB/s"
+        else:
+            speed_str = ""
+            
+        # Final summary
+        if total_errors == 0:
+            summary = (f"All {len(file_urls)} files downloaded successfully!"
+                       f"\nTotal downloaded: {total_size/(1024*1024):.2f} MB{speed_str}")
+            summary_box = draw_box(summary, title="Download Complete", color="green")
+        else:
+            summary = (f"Download summary: {total_success}/{len(file_urls)} successful"
+                       f"\nFiles with errors: {total_errors}"
+                       f"\nTotal downloaded: {total_size/(1024*1024):.2f} MB{speed_str}")
+            summary_box = draw_box(summary, title="Download Summary", color="yellow")
+            
+        print(f"\n{summary_box}\n")
+        logger.info(f"Batched download complete: {total_success}/{len(file_urls)} files downloaded successfully")
+        
+        return total_errors == 0
+            
+    def _download_files_concurrently(self, file_urls, download_dir, is_batch=False):
+        """
+        Download multiple files concurrently using a thread pool.
+        
+        Args:
+            file_urls (list): List of file URLs to download
+            download_dir (str): Directory to download files to
+            is_batch (bool): Whether this is part of a larger batch process
+            
+        Returns:
+            bool or dict: If is_batch=True, returns dict with stats, otherwise True if successful
+        """
+        if not file_urls:
+            return True if not is_batch else {'success': 0, 'errors': 0, 'total_size': 0, 'total_time': 0}
             
         logger.info(f"Starting concurrent downloads with {min(self.max_concurrent_downloads, len(file_urls))} workers")
         
@@ -426,6 +615,9 @@ class DownloadController:
             # Track current download speed
             current_speed = 0
             
+            # Track memory check counter for periodic cleanup
+            memory_check_count = 0
+            
             while futures_to_url:
                 # Wait for the next future to complete
                 done, _ = concurrent.futures.wait(
@@ -437,6 +629,13 @@ class DownloadController:
                     url = futures_to_url.pop(future)
                     active_downloads -= 1
                     completed_count += 1
+                    memory_check_count += 1
+                    
+                    # Check memory periodically during concurrent downloads
+                    # This helps prevent memory leaks from accumulating
+                    if memory_check_count >= MEMORY_CHECK_INTERVAL:
+                        check_memory_usage()
+                        memory_check_count = 0
                     
                     try:
                         result = future.result()
@@ -484,6 +683,9 @@ class DownloadController:
                             reduced_concurrency = True
                             # Allow some time for the system to recover
                             time.sleep(3.0)
+                            
+                            # Clean up memory
+                            check_memory_usage(force_collect=True)
                         
                     except Exception as e:
                         error_msg = f"Error processing {url}: {str(e)}"
@@ -519,6 +721,15 @@ class DownloadController:
         else:
             skipped_stats = ""
         
+        # For batched operations, return stats instead of printing summary
+        if is_batch:
+            return {
+                'success': success_count,
+                'errors': error_count,
+                'total_size': total_size,
+                'total_time': total_time
+            }
+        
         # Create a final summary box with the results
         if error_count > 0:
             summary = (f"Files downloaded successfully: {success_count}/{len(file_urls)}\n"
@@ -531,6 +742,10 @@ class DownloadController:
         
         print(f"\n{summary_box}\n")
         logger.info(f"Download complete: {success_count}/{len(file_urls)} files downloaded successfully")
+        
+        # Force memory cleanup after concurrent downloads
+        check_memory_usage(force_collect=True)
+        
         return error_count == 0  # Return true only if there were no errors
             
     def _download_files_sequentially(self, file_urls, download_dir):
@@ -564,7 +779,16 @@ class DownloadController:
         skipped = 0
         error_count = 0
         
+        # Set memory check counter for periodic cleanup
+        memory_check_counter = 0
+        
         for i, url in enumerate(file_urls):
+            # Periodically check and clean memory during sequential downloads
+            memory_check_counter += 1
+            if memory_check_counter >= MEMORY_CHECK_INTERVAL:
+                check_memory_usage()
+                memory_check_counter = 0
+                
             # Create file info box for each download
             file_info = f"File {i+1}/{len(file_urls)}"
             file_box = draw_box(f"URL: {url}", title=file_info, color="cyan")
@@ -630,6 +854,10 @@ class DownloadController:
             
         print(f"\n{summary_box}\n")
         logger.info(f"Download complete: {success_count}/{len(file_urls)} files downloaded successfully")
+        
+        # Force garbage collection to clean up resources
+        check_memory_usage(force_collect=True)
+        
         return error_count == 0  # Return true only if there were no errors
             
     def _download_file(self, file_url, download_dir=None):

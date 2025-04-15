@@ -36,6 +36,10 @@ DEFAULT_PROXY = None  # Set to your proxy URL (e.g., 'socks5://127.0.0.1:9050')
 DEFAULT_CONCURRENT_DOWNLOADS = 3  # Default number of concurrent downloads (keep low to avoid bans)
 CONCURRENT_DELAY = 1.5  # Delay between starting concurrent downloads (seconds)
 
+# Parser settings
+USE_INCREMENTAL_PARSER = True  # Use memory-efficient incremental HTML parser for large albums
+INCREMENTAL_CHUNK_SIZE = 8192  # Size of chunks (in bytes) for incremental parsing (8KB default)
+
 # HTTP Request Headers
 REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',

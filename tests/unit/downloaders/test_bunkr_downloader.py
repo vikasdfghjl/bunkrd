@@ -85,21 +85,21 @@ class TestBunkrDownloader(unittest.TestCase):
         mock_api_response = MockResponse(status_code=404)
         self.downloader.make_api_request = mock.Mock(return_value=mock_api_response)
         
-        with mock.patch('builtins.print') as mock_print:
+        with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger:
             result = self.downloader.get_real_download_url('https://bunkr.sk/f/test-file')
             
             # Assertions
             self.assertIsNone(result)
-            mock_print.assert_called()
+            mock_logger.assert_called()
     
     def test_get_real_download_url_invalid_url(self):
         """Test URL retrieval with invalid URL format."""
-        with mock.patch('builtins.print') as mock_print:
+        with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger:
             result = self.downloader.get_real_download_url('https://bunkr.sk/invalid-url')
             
             # Assertions
             self.assertIsNone(result)
-            mock_print.assert_called()
+            mock_logger.assert_called()
     
     def test_get_encryption_data_success(self):
         """Test successful retrieval of encryption data."""
@@ -145,24 +145,24 @@ class TestBunkrDownloader(unittest.TestCase):
     def test_decrypt_encrypted_url_missing_data(self):
         """Test URL decryption with missing data."""
         # Test with missing url
-        with mock.patch('builtins.print') as mock_print:
+        with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger:
             result = self.downloader._decrypt_encrypted_url({
                 'timestamp': 1649776000
             })
             
             # Assertions
             self.assertIsNone(result)
-            mock_print.assert_called()
+            mock_logger.assert_called()
         
         # Test with missing timestamp
-        with mock.patch('builtins.print') as mock_print:
+        with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger:
             result = self.downloader._decrypt_encrypted_url({
                 'url': 'encrypted-url'
             })
             
             # Assertions
             self.assertIsNone(result)
-            mock_print.assert_called()
+            mock_logger.assert_called()
     
     def test_decrypt_encrypted_url_decrypt_error(self):
         """Test URL decryption with decryption error."""
@@ -175,17 +175,12 @@ class TestBunkrDownloader(unittest.TestCase):
             'bunkrd.downloaders.bunkr_downloader.decrypt_with_key',
             return_value=None  # Simulates decryption failure
         ) as mock_decrypt:
-            with mock.patch('builtins.print') as mock_print:
-                with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger_error:
-                    result = self.downloader._decrypt_encrypted_url(encryption_data)
-                    
-                    # Assertions
-                    self.assertIsNone(result)
-                    # Check that either print or logging was used for error reporting
-                    self.assertTrue(
-                        mock_print.called or mock_logger_error.called,
-                        "Neither print nor logger.error was called"
-                    )
+            with mock.patch('bunkrd.downloaders.bunkr_downloader.logger.error') as mock_logger_error:
+                result = self.downloader._decrypt_encrypted_url(encryption_data)
+                
+                # Assertions
+                self.assertIsNone(result)
+                mock_logger_error.assert_called()
 
 
 if __name__ == '__main__':
